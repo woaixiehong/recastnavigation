@@ -16,6 +16,8 @@
 // 3. This notice may not be removed or altered from any source distribution.
 //
 
+#include <fstream>
+
 #include <float.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -28,6 +30,141 @@
 
 namespace
 {
+	void printBegin()
+	{
+#ifdef DEBUG_REGION
+		using namespace std;
+		std::ofstream out;
+		out.open("E:\\Test\\RecastTest\\recast.log", ios::out | ios::binary);
+		out << "Recast Flood" << endl;
+		out.close();
+#endif // DEBUG_REGION
+	}
+
+	void printTag(char* tag)
+	{
+#ifdef DEBUG_REGION
+		using namespace std;
+		std::ofstream out;
+		out.open("E:\\Test\\RecastTest\\recast.log", ios::out | ios::binary | ios::app);
+		out << tag << std::endl;
+		out.close();
+#endif // DEBUG_REGION
+	}
+
+	void print(int w, int h, const rcCompactHeightfield& chf, unsigned short* srcReg)
+	{
+#ifdef DEBUG_REGION
+
+		using namespace std;
+		std::ofstream out;
+		out.open("E:\\Test\\RecastTest\\recast.log", ios::out | ios::binary | ios::app);
+		unsigned int* width = new unsigned int[w];
+		for (int i = 0; i < w; ++i)
+		{
+			width[i] = 1;
+		}
+
+		for (int y = 0; y < h; ++y)
+		{
+			for (int x = 0; x < w; ++x)
+			{
+				const rcCompactCell& c = chf.cells[x + y * w];
+				width[x] = width[x] > c.count ? width[x] : c.count;
+			}
+		}
+		for (int y = h - 1; y >= 0; --y)
+		{
+			const int lineLong = 10240;
+			int tabCount = 0;
+			char line[lineLong] = "";
+			memset(line, 0, lineLong);
+			for (int x = 0; x < w; ++x)
+			{
+				const rcCompactCell& c = chf.cells[x + y * w];
+
+				for (int i = (int)c.index, ni = (int)(c.index + c.count); i < ni; ++i)
+				{
+					tabCount += (i - c.index);
+					for (unsigned int j = 0; j < c.count; ++j)
+					{
+						sprintf(line, "%s\t", line);
+					}
+
+					sprintf(line, "%s%d:%2d-%2d-[%2d]", line, x, chf.areas[i], chf.dist[i], srcReg[i]);
+				}
+				if (c.count <= 0)
+				{
+					sprintf(line, "%s\t[NULL      ]", line);
+				}
+			}
+
+			out << line << std::endl;
+		}
+
+		char splitLine[1000] = "-------------------------------------------";
+		out << splitLine << std::endl;
+
+		out.flush();
+		out.close();
+		delete[] width;
+
+#endif // DEBUG_REGION
+	}
+
+
+
+	void printDistArea(int w, int h, const rcCompactHeightfield& chf, unsigned short* srcReg)
+	{
+#ifdef DEBUG_REGION
+		using namespace std;
+		std::ofstream distFile;
+		std::ofstream areaFile;
+		distFile.open("E:\\Test\\RecastTest\\dist.log", ios::out | ios::binary);
+		areaFile.open("E:\\Test\\RecastTest\\area.log", ios::out | ios::binary);
+		
+		for (int y = h - 1; y >= 0; --y)
+		{
+			const int lineLong = 10240;
+			int tabCount = 0;
+			char distLine[lineLong] = "";
+			memset(distLine, 0, lineLong);
+			char areaLine[lineLong] = "";
+			memset(areaLine, 0, lineLong);
+			for (int x = 0; x < w; ++x)
+			{
+				const rcCompactCell& c = chf.cells[x + y * w];
+
+				for (int i = (int)c.index, ni = (int)(c.index + c.count); i < ni; ++i)
+				{
+					tabCount += (i - c.index);
+					for (unsigned int j = 0; j < c.count; ++j)
+					{
+						sprintf(distLine, "%s\t", distLine);
+						sprintf(areaLine, "%s\t", areaLine);
+					}
+
+					sprintf(distLine, "%s%d", distLine, chf.dist[i]);
+					sprintf(areaLine, "%s%d", areaLine, chf.areas[i]);
+				}
+				if (c.count <= 0)
+				{
+					sprintf(distLine, "%s\t-1", distLine);
+					sprintf(areaLine, "%s\t-1", areaLine);
+				}
+			}
+
+			distFile << distLine << std::endl;
+			areaFile << areaLine << std::endl;
+		}
+
+		distFile.flush();
+		distFile.close();
+		areaFile.flush();
+		areaFile.close();
+#endif // DEBUG_REGION
+	}
+
 struct LevelStackEntry
 {
 	LevelStackEntry(int x_, int y_, int index_) : x(x_), y(y_), index(index_) {}
@@ -470,7 +607,9 @@ static void expandRegions(int maxIter, unsigned short level,
 			srcReg[idx] = dirtyEntries[i].region;
 			srcDist[idx] = dirtyEntries[i].distance2;
 		}
-		
+
+		printTag("execute expandRegions");
+		print(w, h, chf, srcReg);
 		if (failed == stack.size())
 			break;
 		
@@ -1615,6 +1754,7 @@ bool rcBuildRegions(rcContext* ctx, rcCompactHeightfield& chf,
 //	const int expandIters = 4 + walkableRadius * 2;
 	const int expandIters = 8;
 
+	printBegin();
 	if (borderSize > 0)
 	{
 		// Make sure border will not overflow.
@@ -1623,19 +1763,34 @@ bool rcBuildRegions(rcContext* ctx, rcCompactHeightfield& chf,
 		
 		// 先把border部分标记为不同的region
 		// Paint regions
+		printTag("Begin");
+		print(w, h, chf, srcReg);
 		paintRectRegion(0, bw, 0, h, regionId|RC_BORDER_REG, chf, srcReg); regionId++;
+		printTag("Board1");
+		print(w, h, chf, srcReg);
 		paintRectRegion(w-bw, w, 0, h, regionId|RC_BORDER_REG, chf, srcReg); regionId++;
+		printTag("Board2");
+		print(w, h, chf, srcReg);
 		paintRectRegion(0, w, 0, bh, regionId|RC_BORDER_REG, chf, srcReg); regionId++;
+		printTag("Board3");
+		print(w, h, chf, srcReg);
 		paintRectRegion(0, w, h-bh, h, regionId|RC_BORDER_REG, chf, srcReg); regionId++;
+		printTag("Board4");
+		print(w, h, chf, srcReg);
 	}
 
 	chf.borderSize = borderSize;
 	
+	printDistArea(w, h, chf, srcReg);
+
 	int sId = -1;
 	while (level > 0)
 	{
 		level = level >= 2 ? level-2 : 0;
 		sId = (sId+1) & (NB_STACKS-1);
+		char debug[1024];
+		sprintf(debug, "level:%d sId:%d", level, sId);
+		printTag(debug);
 
 //		ctx->startTimer(RC_TIMER_DIVIDE_TO_LEVELS);
 		// NB_STACKS次为一个轮回，每个轮回处理NB_STACKS*2层的span
@@ -1656,6 +1811,7 @@ bool rcBuildRegions(rcContext* ctx, rcCompactHeightfield& chf,
 		{
 			rcScopedTimer timerFloor(ctx, RC_TIMER_BUILD_REGIONS_FLOOD);
 
+			printTag("try floodRegion...");
 			// Mark new regions with IDs.
 			for (int j = 0; j<lvlStacks[sId].size(); j++)
 			{
@@ -1674,6 +1830,9 @@ bool rcBuildRegions(rcContext* ctx, rcCompactHeightfield& chf,
 						}
 						
 						regionId++;
+
+						printTag("after floodRegion");
+						print(w, h, chf, srcReg);
 					}
 				}
 			}
@@ -1682,7 +1841,10 @@ bool rcBuildRegions(rcContext* ctx, rcCompactHeightfield& chf,
 	
 	// Expand current regions until no empty connected cells found.
 	expandRegions(expandIters*8, 0, chf, srcReg, srcDist, stack, true);
-	
+
+	printTag("end");
+	print(w, h, chf, srcReg);
+
 	ctx->stopTimer(RC_TIMER_BUILD_REGIONS_WATERSHED);
 	
 	{
