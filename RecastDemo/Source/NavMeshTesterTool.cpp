@@ -634,13 +634,19 @@ void NavMeshTesterTool::handleToggle()
 
 }
 
-void NavMeshTesterTool::handleUpdate(const float /*dt*/)
+void NavMeshTesterTool::handleUpdate(const float dt)
 {
+	static float s_searchUpdateTime = 0;
 	if (m_toolMode == TOOLMODE_PATHFIND_SLICED)
 	{
 		if (dtStatusInProgress(m_pathFindStatus))
 		{
-			m_pathFindStatus = m_navQuery->updateSlicedFindPath(1,0);
+			s_searchUpdateTime += dt;
+			if (s_searchUpdateTime > 0.5f)
+			{
+				m_pathFindStatus = m_navQuery->updateSlicedFindPath(1, 0);
+				s_searchUpdateTime = 0;
+			}
 		}
 		if (dtStatusSucceed(m_pathFindStatus))
 		{
