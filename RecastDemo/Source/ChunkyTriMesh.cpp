@@ -210,6 +210,7 @@ inline bool checkOverlapRect(const float amin[2], const float amax[2],
 	return overlap;
 }
 
+// xiehong：获取一个tile范围内（加上border）有多少个node（三角形）
 int rcGetChunksOverlappingRect(const rcChunkyTriMesh* cm,
 							   float bmin[2], float bmax[2],
 							   int* ids, const int maxIds)

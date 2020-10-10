@@ -102,6 +102,8 @@ static float getDistanceToGoal(const dtCrowdAgent* ag, const float range)
 	return range;
 }
 
+// xiehong：尝试想象从0、0点移动到1、0，再移动到1、1
+// 会让拐弯之前会走一定的弧线
 static void calcSmoothSteerDirection(const dtCrowdAgent* ag, float* dir)
 {
 	if (!ag->ncorners)
@@ -674,7 +676,8 @@ int dtCrowd::getActiveAgents(dtCrowdAgent** agents, const int maxAgents)
 	return n;
 }
 
-
+// xiehong：这个方法尝试一次获取到每个处于DT_CROWDAGENT_TARGET_REQUESTING状态的anget的完整路径
+// 如果一次获取不到，则分帧获取
 void dtCrowd::updateMoveRequest(const float /*dt*/)
 {
 	const int PATH_MAX_AGENTS = 8;
@@ -721,6 +724,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 
 			if (!dtStatusFailed(status) && reqPathCount > 0)
 			{
+				// xiehong：设置reqPos为终点或在已经找出来的所有poly中寻找距离终点最近的点，reqPos的含义是当前路径能到达的最远点
 				// In progress or succeed.
 				if (reqPath[reqPathCount-1] != ag->targetRef)
 				{
@@ -747,6 +751,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 				reqPathCount = 1;
 			}
 
+			// xiehong：初始化corridor：需要一个终点和一条polypath
 			ag->corridor.setCorridor(reqPos, reqPath, reqPathCount);
 			ag->boundary.reset();
 			ag->partial = false;
@@ -765,25 +770,30 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 		
 		if (ag->targetState == DT_CROWDAGENT_TARGET_WAITING_FOR_QUEUE)
 		{
+			// xiehong：注意这里不一定能加到Queue里去，queue可能是满了，就需要等待下一帧再处理
 			nqueue = addToPathQueue(ag, queue, nqueue, PATH_MAX_AGENTS);
 		}
 	}
 
+	// xiehong：对于没有完整路径的agent，放到一个队列里（m_pathq），分帧查整体路径，先把请求放入列表，并记录请求凭据：targetPathqRef
 	for (int i = 0; i < nqueue; ++i)
 	{
 		dtCrowdAgent* ag = queue[i];
 		ag->targetPathqRef = m_pathq.request(ag->corridor.getLastPoly(), ag->targetRef,
 											 ag->corridor.getTarget(), ag->targetPos, &m_filters[ag->params.queryFilterType]);
+
+		// xiehong：注意这里也不一定能加到队列里去，有可能队列满了，还是要等下一帧处理
 		if (ag->targetPathqRef != DT_PATHQ_INVALID)
 			ag->targetState = DT_CROWDAGENT_TARGET_WAITING_FOR_PATH;
 	}
 
-	
+	// xiehong：分帧处理计算整体路径，每帧处理最多100个poly，当然中间某条路径可能超过100个poly，所以这里的输入参数是个期望值
 	// Update requests.
 	m_pathq.update(MAX_ITERS_PER_UPDATE);
 
 	dtStatus status;
 
+	// xiehong：这里要注意的是分帧处理的，所以可能跟之前的逻辑是异步的
 	// Process path results.
 	for (int i = 0; i < m_maxAgents; ++i)
 	{
@@ -854,6 +864,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 						memcpy(res, path, sizeof(dtPolyRef)*(npath-1));
 						nres += npath-1;
 						
+						// xiehong：这一步是为什么？？
 						// Remove trackbacks
 						for (int j = 0; j < nres; ++j)
 						{
@@ -870,6 +881,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 						
 					}
 					
+					// xiehong：有可能终点就是到不了，则选一个最近的点
 					// Check for partial path.
 					if (res[nres-1] != ag->targetRef)
 					{
@@ -885,6 +897,7 @@ void dtCrowd::updateMoveRequest(const float /*dt*/)
 				
 				if (valid)
 				{
+					// xiehong：根据完整路径重新设置corridor
 					// Set current corridor.
 					ag->corridor.setCorridor(targetPos, res, nres);
 					// Force to update boundary.
@@ -938,6 +951,7 @@ void dtCrowd::updateTopologyOptimization(dtCrowdAgent** agents, const int nagent
 
 }
 
+// xiehong：这个方法主要检查起点终点，或者已经存在的corridor路径上的点是否合法，不合法就设置为replan
 void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const float dt)
 {
 	static const int CHECK_LOOKAHEAD = 10;
@@ -959,6 +973,7 @@ void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const 
 		float agentPos[3];
 		dtPolyRef agentRef = ag->corridor.getFirstPoly();
 		dtVcopy(agentPos, ag->npos);
+		// xiehong：检查当前位置是否合法，如果不合法则设置一个新位置，replan=true
 		if (!m_navquery->isValidPolyRef(agentRef, &m_filters[ag->params.queryFilterType]))
 		{
 			// Current location is not valid, try to reposition.
@@ -993,6 +1008,7 @@ void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const 
 		if (ag->targetState == DT_CROWDAGENT_TARGET_NONE || ag->targetState == DT_CROWDAGENT_TARGET_VELOCITY)
 			continue;
 
+		// xiehong：检查目标是否仍然合法，如果不合法，则重新设置一个最近的合法目标，并清空corrider，replan=true
 		// Try to recover move request position.
 		if (ag->targetState != DT_CROWDAGENT_TARGET_NONE && ag->targetState != DT_CROWDAGENT_TARGET_FAILED)
 		{
@@ -1015,6 +1031,7 @@ void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const 
 			}
 		}
 
+		// xiehong：查看corridor上的每个poly是否合法
 		// If nearby corridor is not valid, replan.
 		if (!ag->corridor.isValid(CHECK_LOOKAHEAD, m_navquery, &m_filters[ag->params.queryFilterType]))
 		{
@@ -1027,6 +1044,7 @@ void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const 
 		// If the end of the path is near and it is not the requested location, replan.
 		if (ag->targetState == DT_CROWDAGENT_TARGET_VALID)
 		{
+			// xiehong：超过1s，并且corridor剩下的poly小于10个，并且当前corridor的最后一个poly还不是目标poly
 			if (ag->targetReplanTime > TARGET_REPLAN_DELAY &&
 				ag->corridor.getPathCount() < CHECK_LOOKAHEAD &&
 				ag->corridor.getLastPoly() != ag->targetRef)
@@ -1038,6 +1056,7 @@ void dtCrowd::checkPathValidity(dtCrowdAgent** agents, const int nagents, const 
 		{
 			if (ag->targetState != DT_CROWDAGENT_TARGET_NONE)
 			{
+				// xiehong：这个方法主要只是修改了targetState状态为：DT_CROWDAGENT_TARGET_REQUESTING
 				requestMoveTargetReplan(idx, ag->targetRef, ag->targetPos);
 			}
 		}
@@ -1085,6 +1104,7 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 		if (dtVdist2DSqr(ag->npos, ag->boundary.getCenter()) > dtSqr(updateThr) ||
 			!ag->boundary.isValid(m_navquery, &m_filters[ag->params.queryFilterType]))
 		{
+			// xiehong：更新当前boundary：collisionQueryRange半径内的所有不可达边
 			ag->boundary.update(ag->corridor.getFirstPoly(), ag->npos, ag->params.collisionQueryRange,
 								m_navquery, &m_filters[ag->params.queryFilterType]);
 		}
@@ -1096,6 +1116,7 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 			ag->neis[j].idx = getAgentIndex(agents[ag->neis[j].idx]);
 	}
 	
+	// xiehong：这一步是计算真实路径（每帧都计算一次，感觉实在太费了）
 	// Find next corner to steer to.
 	for (int i = 0; i < nagents; ++i)
 	{
@@ -1114,6 +1135,7 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 		// and short cut to there.
 		if ((ag->params.updateFlags & DT_CROWD_OPTIMIZE_VIS) && ag->ncorners > 0)
 		{
+			// cornerVerts的第一个点一般是findStraightPath返回的第二个点，起点肯定会被优化掉，所以下面代码取第二个点，则是真实的第三个点
 			const float* target = &ag->cornerVerts[dtMin(1,ag->ncorners-1)*3];
 			ag->corridor.optimizePathVisibility(target, ag->params.pathOptimizationRange, m_navquery, &m_filters[ag->params.queryFilterType]);
 			
@@ -1195,20 +1217,23 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 		}
 		else
 		{
+			// xiehong：这一段是计算速度矢量 dvel=desired velocity
 			// Calculate steering direction.
 			if (ag->params.updateFlags & DT_CROWD_ANTICIPATE_TURNS)
 				calcSmoothSteerDirection(ag, dvel);
 			else
 				calcStraightSteerDirection(ag, dvel);
 			
+			// xiehong：快到了就减慢速度
 			// Calculate speed scale, which tells the agent to slowdown at the end of the path.
 			const float slowDownRadius = ag->params.radius*2;	// TODO: make less hacky.
 			const float speedScale = getDistanceToGoal(ag, slowDownRadius) / slowDownRadius;
-				
+			// dvel之前归一化了
 			ag->desiredSpeed = ag->params.maxSpeed;
 			dtVscale(dvel, dvel, ag->desiredSpeed * speedScale);
 		}
 
+		// xiehong：这里尝试修正速度让相邻的agent各自避开
 		// Separation
 		if (ag->params.updateFlags & DT_CROWD_SEPARATION)
 		{
@@ -1228,10 +1253,15 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 				diff[1] = 0;
 				
 				const float distSqr = dtVlenSqr(diff);
+				// xiehong：太近了怎么办？？
 				if (distSqr < 0.00001f)
 					continue;
 				if (distSqr > dtSqr(separationDist))
 					continue;
+
+				// xiehong：这是避障最核心的部分
+				// 每个邻居的影响为：separationWeight*(1-(dis/separationDist)^2)/dis，这个是根据dis变化的越来越小的曲线dis=separationDist时为0
+				// 相当于每个邻居都会对agent施加一个跟距离负相关的推力，使其在二者连线方向速度减少
 				const float dist = dtMathSqrtf(distSqr);
 				const float weight = separationWeight * (1.0f - dtSqr(dist*invSeparationDist));
 				
@@ -1246,6 +1276,7 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 				// Clamp desired velocity to desired speed.
 				const float speedSqr = dtVlenSqr(dvel);
 				const float desiredSqr = dtSqr(ag->desiredSpeed);
+				// xiehong：最终叠加出来的速度如果过大还要再改回之前的绝对值大小
 				if (speedSqr > desiredSqr)
 					dtVscale(dvel, dvel, desiredSqr/speedSqr);
 			}
@@ -1292,7 +1323,8 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 			int ns = 0;
 
 			const dtObstacleAvoidanceParams* params = &m_obstacleQueryParams[ag->params.obstacleAvoidanceType];
-				
+			
+			// xiehong：通过dvel算出nvel
 			if (adaptive)
 			{
 				ns = m_obstacleQuery->sampleVelocityAdaptive(ag->npos, ag->params.radius, ag->desiredSpeed,
@@ -1383,7 +1415,7 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 			dtCrowdAgent* ag = agents[i];
 			if (ag->state != DT_CROWDAGENT_STATE_WALKING)
 				continue;
-			
+			// xiehong：这一步设置预期要移动的位置
 			dtVadd(ag->npos, ag->npos, ag->disp);
 		}
 	}
@@ -1394,9 +1426,11 @@ void dtCrowd::update(const float dt, dtCrowdAgentDebugInfo* debug)
 		if (ag->state != DT_CROWDAGENT_STATE_WALKING)
 			continue;
 		
+		// xiehong：最终控制移动（最终的位置还是放在了corridor里，npos会跟corridor保持一致）
 		// Move along navmesh.
 		ag->corridor.movePosition(ag->npos, m_navquery, &m_filters[ag->params.queryFilterType]);
 		// Get valid constrained position back.
+		// xiehong：因为有可能最终的位置不是预期的位置，则修正一下
 		dtVcopy(ag->npos, ag->corridor.getPos());
 
 		// If not using path, truncate the corridor to just one poly.

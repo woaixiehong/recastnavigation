@@ -128,6 +128,9 @@ static bool addSpan(rcHeightfield& hf, const int x, const int y,
 			if (cur->smax > s->smax)
 				s->smax = cur->smax;
 			
+			// xiehong：意思是：areaid越大越能表示约束越小
+			// demo中会先把斜率小于指定值的都标记为RC_WALKABLE_AREA（63），然后就马上进入这里
+			// 所以demo的代码运行到这里不是0（不可移动）就是63，但是自己写的话，也可以有其他情况
 			// Merge flags.
 			if (rcAbs((int)s->smax - (int)cur->smax) <= flagMergeThr)
 				s->area = rcMax(s->area, cur->area);
@@ -180,6 +183,11 @@ bool rcAddSpan(rcContext* ctx, rcHeightfield& hf, const int x, const int y,
 	return true;
 }
 
+// xiehong：输入为一个多边形in，nin：多边形边数
+// x和axis表示在某个轴的法平面，位置为x，axis=0、1、2表示x、y、z轴
+// x和axis把空间划分为两个部分，大于x的部分和小于x的部分
+// out1表示切分完后，小于x部分空间上的多边形
+// out2表示大于部分
 // divides a convex polygons into two convex polygons on both sides of a line
 static void dividePoly(const float* in, int nin,
 					  float* out1, int* nout1,
@@ -206,7 +214,7 @@ static void dividePoly(const float* in, int nin,
 			n++;
 			// add the i'th point to the right polygon. Do NOT add points that are on the dividing line
 			// since these were already added above
-			if (d[i] > 0)
+			if (d[i] > 0)// 小于x
 			{
 				rcVcopy(out1 + m*3, in + i*3);
 				m++;
@@ -237,7 +245,11 @@ static void dividePoly(const float* in, int nin,
 }
 
 
-
+// xiehong：v0、v1、v2表示三角形
+// area表示三角形是不是可以走
+// hf是输出数据
+// bmin、bmax表示这个hf所在Tile的包围盒
+// cs一个体素多少米宽（x-z），ics一米宽多少体素（x-z），ich，一米高多少体素（y轴）
 static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 						 const unsigned char area, rcHeightfield& hf,
 						 const float* bmin, const float* bmax,
@@ -258,13 +270,14 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 	rcVmax(tmax, v2);
 	
 	// If the triangle does not touch the bbox of the heightfield, skip the triagle.
+	// xiehong：heightfield的包围盒虽然跟node的包围盒相交，但很可能不跟node中某个“三角形的包围盒”相交
 	if (!overlapBounds(bmin, bmax, tmin, tmax))
 		return true;
 	
 	// Calculate the footprint of the triangle on the grid's y-axis
 	int y0 = (int)((tmin[2] - bmin[2])*ics);
 	int y1 = (int)((tmax[2] - bmin[2])*ics);
-	y0 = rcClamp(y0, 0, h-1);
+	y0 = rcClamp(y0, 0, h-1);			// HF从0开始到h-1（z轴）
 	y1 = rcClamp(y1, 0, h-1);
 	
 	// Clip the triangle into all grid cells it touches.
@@ -276,6 +289,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 	rcVcopy(&in[2*3], v2);
 	int nvrow, nvIn = 3;
 	
+	// 按z方向的体素单位遍历
 	for (int y = y0; y <= y1; ++y)
 	{
 		// Clip polygon to row. Store the remaining polygon as well
@@ -298,6 +312,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 
 		int nv, nv2 = nvrow;
 
+		// 按x方向的体素单位遍历
 		for (int x = x0; x <= x1; ++x)
 		{
 			// Clip polygon to column. store the remaining polygon as well
@@ -307,6 +322,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 			if (nv < 3) continue;
 			
 			// Calculate min and max of the span.
+			// smin表示span min，y轴方向最小（单位：米）
 			float smin = p1[1], smax = p1[1];
 			for (int i = 1; i < nv; ++i)
 			{

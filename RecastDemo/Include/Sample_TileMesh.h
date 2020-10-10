@@ -66,7 +66,7 @@ protected:
 	
 	int m_maxTiles;
 	int m_maxPolysPerTile;
-	float m_tileSize;
+	float m_tileSize;	// xiehong：一个Tile包含多少个体素
 	
 	unsigned int m_tileCol;
 	float m_lastBuiltTileBmin[3];

@@ -35,6 +35,9 @@
 /// @see rcHeightfield, rcConfig
 void rcFilterLowHangingWalkableObstacles(rcContext* ctx, const int walkableClimb, rcHeightfield& solid)
 {
+	// xiehong：会对上下相邻两个span进行检查，如果两个span的上表面差距小于climbheight，
+	// 并且下面的span是可行走而上面的span是不可行走，则会把上面的也改成可行走。
+	// 注areaid不为0即可行走，不一定是63
 	rcAssert(ctx);
 
 	rcScopedTimer timer(ctx, RC_TIMER_FILTER_LOW_OBSTACLES);
@@ -79,6 +82,9 @@ void rcFilterLowHangingWalkableObstacles(rcContext* ctx, const int walkableClimb
 /// A span is a ledge if: <tt>rcAbs(currentSpan.smax - neighborSpan.smax) > walkableClimb</tt>
 /// 
 /// @see rcHeightfield, rcConfig
+// xiehong：遍历每一个span，把符合条件的设置为不可行走：
+// 1. 周围四个方向，只要朝那个方向可以移动过去（空间大于>walkableHeight），并且会掉落的距离超过walkableClimb
+// 2. 周围四个方向，其中的两个方向的span落差超过walkableClimb
 void rcFilterLedgeSpans(rcContext* ctx, const int walkableHeight, const int walkableClimb,
 						rcHeightfield& solid)
 {
@@ -118,6 +124,7 @@ void rcFilterLedgeSpans(rcContext* ctx, const int walkableHeight, const int walk
 					// Skip neighbours which are out of bounds.
 					if (dx < 0 || dy < 0 || dx >= w || dy >= h)
 					{
+						// xiehong：对于不可行走的区域bot统一为-walkableClimb
 						minh = rcMin(minh, -walkableClimb - bot);
 						continue;
 					}
@@ -127,6 +134,7 @@ void rcFilterLedgeSpans(rcContext* ctx, const int walkableHeight, const int walk
 					int nbot = -walkableClimb;
 					int ntop = ns ? (int)ns->smin : MAX_HEIGHT;
 					// Skip neightbour if the gap between the spans is too small.
+					// xiehong：先看一下临接的这个span柱最下面的空心部分，是不是可以走过去（就是看看是不是会掉坑里）
 					if (rcMin(top,ntop) - rcMax(bot,nbot) > walkableHeight)
 						minh = rcMin(minh, nbot - bot);
 					
@@ -174,6 +182,7 @@ void rcFilterLedgeSpans(rcContext* ctx, const int walkableHeight, const int walk
 /// maximum to the next higher span's minimum. (Same grid column.)
 /// 
 /// @see rcHeightfield, rcConfig
+// xiehong：距离顶头span（如果有）太近（< walkableHeight），则会被标记为不可行走
 void rcFilterWalkableLowHeightSpans(rcContext* ctx, int walkableHeight, rcHeightfield& solid)
 {
 	rcAssert(ctx);

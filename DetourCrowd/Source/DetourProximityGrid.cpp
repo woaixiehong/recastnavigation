@@ -126,6 +126,7 @@ void dtProximityGrid::addItem(const unsigned short id,
 				item.x = (short)x;
 				item.y = (short)y;
 				item.id = id;
+				// xiehong：m_buckets[h]指向了本x、y范围的最后一个item，每个item的next指向了比它之前插入的一个item
 				item.next = m_buckets[h];
 				m_buckets[h] = idx;
 			}

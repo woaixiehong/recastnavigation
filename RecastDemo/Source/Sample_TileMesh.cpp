@@ -729,12 +729,12 @@ void Sample_TileMesh::buildAllTiles()
 	
 	const float* bmin = m_geom->getNavMeshBoundsMin();
 	const float* bmax = m_geom->getNavMeshBoundsMax();
-	int gw = 0, gh = 0;
+	int gw = 0, gh = 0;	// 单位是体素
 	rcCalcGridSize(bmin, bmax, m_cellSize, &gw, &gh);
 	const int ts = (int)m_tileSize;
-	const int tw = (gw + ts-1) / ts;
+	const int tw = (gw + ts-1) / ts;	// xiehong：求出一行有多少个tile
 	const int th = (gh + ts-1) / ts;
-	const float tcs = m_tileSize*m_cellSize;
+	const float tcs = m_tileSize*m_cellSize;	// 单位非体素
 
 	
 	// Start the build process.
@@ -905,6 +905,7 @@ unsigned char* Sample_TileMesh::buildTileMesh(const int tx, const int ty, const 
 	
 	for (int i = 0; i < ncid; ++i)
 	{
+		// 找出来的一定是leafnode，所以直接使用i和n即可
 		const rcChunkyTriMeshNode& node = chunkyMesh->nodes[cid[i]];
 		const int* ctris = &chunkyMesh->tris[node.i*3];
 		const int nctris = node.n;
@@ -935,6 +936,7 @@ unsigned char* Sample_TileMesh::buildTileMesh(const int tx, const int ty, const 
 	if (m_filterWalkableLowHeightSpans)
 		rcFilterWalkableLowHeightSpans(m_ctx, m_cfg.walkableHeight, *m_solid);
 	
+	// xiehong：注意：经过rcFilterLedgeSpans之后，整个可行走区域都会小一圈
 	// Compact the heightfield so that it is faster to handle from now on.
 	// This will result more cache coherent data as well as the neighbours
 	// between walkable cells will be calculated.

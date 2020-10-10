@@ -23,7 +23,7 @@
 #include "DetourAssert.h"
 #include "DetourAlloc.h"
 
-
+// xiehong：连接两条路径：从visited的终点开始（注意这里！），到两条路径的交点，然后再到path的终点
 int dtMergeCorridorStartMoved(dtPolyRef* path, const int npath, const int maxPath,
 							  const dtPolyRef* visited, const int nvisited)
 {
@@ -107,6 +107,7 @@ int dtMergeCorridorEndMoved(dtPolyRef* path, const int npath, const int maxPath,
 	return ppos+count;
 }
 
+// xiehong：给定一个新的路径visited，尝试把之前老的路径path改成：从visited开始经过两条路径的交点，再从path剩下的路径移动到终点
 int dtMergeCorridorStartShortcut(dtPolyRef* path, const int npath, const int maxPath,
 								 const dtPolyRef* visited, const int nvisited)
 {
@@ -248,6 +249,8 @@ So if 10 corners are needed, the buffers should be sized for 11 corners.
 
 If the target is within range, it will be the last corner and have a polygon reference id of zero.
 */
+// xiehong： 对findStraightPath的结果掐头去尾，掐掉距离太近的点（距离小于0.01，确实很近），去掉offmesh之后的点（不包括offmesh）
+// 一定会去掉findStraightPath返回的第一个点（起点）
 int dtPathCorridor::findCorners(float* cornerVerts, unsigned char* cornerFlags,
 							  dtPolyRef* cornerPolys, const int maxCorners,
 							  dtNavMeshQuery* navquery, const dtQueryFilter* /*filter*/)
@@ -307,6 +310,8 @@ of the call to match the needs to the agent.
 
 This function is not suitable for long distance searches.
 */
+// xiehong：在已有路径的前提下（corridor已经生成），输入一个目标点next（其实是个方向，跟目标点的距离不能小于pathOptimizationRange），
+// 如果从当前点到next是可见的，则把从当前点到next点的路径和已有路径结合
 void dtPathCorridor::optimizePathVisibility(const float* next, const float pathOptimizationRange,
 										  dtNavMeshQuery* navquery, const dtQueryFilter* filter)
 {
@@ -449,6 +454,7 @@ bool dtPathCorridor::movePosition(const float* npos, dtNavMeshQuery* navquery, c
 	dtStatus status = navquery->moveAlongSurface(m_path[0], m_pos, npos, filter,
 												 result, visited, &nvisited, MAX_VISITED);
 	if (dtStatusSucceed(status)) {
+		// xiehong：理论上visited路径的终点就在path上
 		m_npath = dtMergeCorridorStartMoved(m_path, m_npath, m_maxPath, visited, nvisited);
 		
 		// Adjust the position to stay on top of the navmesh.

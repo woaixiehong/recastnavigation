@@ -106,7 +106,7 @@ protected:
 
 	unsigned char m_navMeshDrawFlags;
 
-	float m_cellSize;
+	float m_cellSize;	// xiehong£ºÌåËØ´óĞ¡
 	float m_cellHeight;
 	float m_agentHeight;
 	float m_agentRadius;

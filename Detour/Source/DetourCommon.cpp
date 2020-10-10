@@ -107,6 +107,10 @@ void dtClosestPtPointTriangle(float* closest, const float* p,
 	closest[2] = a[2] + ab[2] * v + ac[2] * w;
 }
 
+// xiehong：一个线段可能穿越一个多边形，min表示进入多边形的交点，max表示出多边形的交点，
+// 当然也可能没有min（起点在这个多边形内）
+// 或者没有max（终点这个多边形内）
+// 或者都没有（线段本身在多边形内）
 bool dtIntersectSegmentPoly2D(const float* p0, const float* p1,
 							  const float* verts, int nverts,
 							  float& tmin, float& tmax,
@@ -132,17 +136,22 @@ bool dtIntersectSegmentPoly2D(const float* p0, const float* p1,
 		if (fabsf(d) < EPS)
 		{
 			// S is nearly parallel to this edge
+			// xiehong：与某条边平行，并且这条边还是最靠近的边（n<0, 表示diff在edge的左边）
 			if (n < 0)
 				return false;
 			else
 				continue;
 		}
 		const float t = n / d;
+		// xiehong： 因为poly是顺时针转的，所以在dir左边的边，总是距离p0近的边，而反之，在dir右边的边，总是距离p0远的边
+		// 所以可以通过判断每条边在dir左边还是右边来判断它是距离p0远还是近
 		if (d < 0)
 		{
+			// xiehong： dir 叉乘 edge <0 表示edge在dir的左边（由于poly是顺时针的，也表示靠近p0的edge）
 			// segment S is entering across this edge
 			if (t > tmin)
 			{
+				// t表示edge（或延长线）到dir（或延长线）上的交点p2到p0长度比上p0到p1的长度（这个通过面积可以算出来）
 				tmin = t;
 				segMin = j;
 				// S enters after leaving polygon
@@ -152,6 +161,7 @@ bool dtIntersectSegmentPoly2D(const float* p0, const float* p1,
 		}
 		else
 		{
+			// xiehong： dir 叉乘 edge <0 表示edge在dir的右边（由于poly是顺时针的，也表示靠近p0的edge）
 			// segment S is leaving across this edge
 			if (t < tmax)
 			{
@@ -169,13 +179,17 @@ bool dtIntersectSegmentPoly2D(const float* p0, const float* p1,
 
 float dtDistancePtSegSqr2D(const float* pt, const float* p, const float* q, float& t)
 {
+	// xiehong：计算在x-z平面上一个点到一条线段的距离，注意是线段而不是直线。
+	// 所以不能简单的做垂线，而是要判断垂线到达的点是不是在线段上，如果不是则要取线段的端点
+	// 返回值是距离的平方
+	// p、q是线段两个端点，t是取得点在这个线段上的百分比，从p开始算：位置 = p + t * (q - p)
 	float pqx = q[0] - p[0];
 	float pqz = q[2] - p[2];
 	float dx = pt[0] - p[0];
 	float dz = pt[2] - p[2];
 	float d = pqx*pqx + pqz*pqz;
-	t = pqx*dx + pqz*dz;
-	if (d > 0) t /= d;
+	t = pqx*dx + pqz*dz;	// t这里求出的是qp和ppt两个向量的点积，同时 t 还等于|pq|*|ppt|*cosθ，假设pt在pq向量上的投影点为pt1，则t=|pq|*|ppt1|
+	if (d > 0) t /= d;		// d = |pq|*|pq|，因此 t/d = |ppt1|/|pq|，而|ppt1|/|pq|很好理解，如果大于1或者小于0，都表示pt1不在pq线段上，因此需要约束在0-1之内
 	if (t < 0) t = 0;
 	else if (t > 1) t = 1;
 	dx = p[0] + t*pqx - pt[0];
@@ -261,6 +275,7 @@ bool dtDistancePtPolyEdgesSqr(const float* pt, const float* verts, const int nve
 	{
 		const float* vi = &verts[i*3];
 		const float* vj = &verts[j*3];
+		// xiehong：这里判断一个点是否在一个凸多边形之内，没看太明白
 		if (((vi[2] > pt[2]) != (vj[2] > pt[2])) &&
 			(pt[0] < (vj[0]-vi[0]) * (pt[2]-vi[2]) / (vj[2]-vi[2]) + vi[0]) )
 			c = !c;
@@ -291,6 +306,8 @@ inline bool overlapRange(const float amin, const float amax,
 /// @par
 ///
 /// All vertices are projected onto the xz-plane, so the y-values are ignored.
+// xiehong： 判断两个多边形是否会重叠
+// 如果两个多边形不重叠，那么一定存在一个多边形的某条边的垂线，当两个多边形都向这条边投影后（成为两条线段），投影后的两条线段不重合
 bool dtOverlapPolyPoly2D(const float* polya, const int npolya,
 						 const float* polyb, const int npolyb)
 {
@@ -370,6 +387,8 @@ void dtRandomPointInConvexPoly(const float* pts, const int npts, float* areas,
 
 inline float vperpXZ(const float* a, const float* b) { return a[0]*b[2] - a[2]*b[0]; }
 
+// xiehong：计算两条线段交点分别距离两条线段开头的位置（百分比）
+// 通过叉乘在平面上的几何意义是面积来换算，s表示交点在a线段上距离ap与aq距离ap的比例，t同理
 bool dtIntersectSegSeg2D(const float* ap, const float* aq,
 						 const float* bp, const float* bq,
 						 float& s, float& t)

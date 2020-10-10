@@ -290,6 +290,8 @@ void dtObstacleAvoidanceQuery::prepare(const float* pos, const float* dvel)
 		dtVnormalize(cir->dp);
 		dtVsub(dv, cir->dvel, dvel);
 		
+		// xiehong：dp表示从agent到邻居的方向
+		// 如果邻居是朝agent右边移动，则邻居的np则是朝右边（连线的法线），否则相反
 		const float a = dtTriArea2D(orig, cir->dp,dv);
 		if (a < 0.01f)
 		{

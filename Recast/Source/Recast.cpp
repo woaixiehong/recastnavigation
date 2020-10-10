@@ -346,6 +346,7 @@ void rcMarkWalkableTriangles(rcContext* ctx, const float walkableSlopeAngle,
 	for (int i = 0; i < nt; ++i)
 	{
 		const int* tri = &tris[i*3];
+		// xiehong：通过法线来计算三角形跟x-z平面的角度
 		calcTriNormal(&verts[tri[0]*3], &verts[tri[1]*3], &verts[tri[2]*3], norm);
 		// Check if the face is walkable.
 		if (norm[1] > walkableThr)

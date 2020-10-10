@@ -204,6 +204,11 @@ struct dtLink
 	dtPolyRef ref;					///< Neighbour reference. (The neighbor that is linked to.)
 	unsigned int next;				///< Index of the next link.
 	unsigned char edge;				///< Index of the polygon edge that owns this link.
+	// 下面3个变量都是用于Tile边界的情况
+	// 在Tile内的两个相邻poly的临边都是互相完全占有的
+	// 而跨Tile的两个相邻poly则不一定，可能一个poly边对应另外一个Tile上的两个poly的边
+	// 所以跨Tile情况下，从源poly的某条边进入哪个目标poly时，光有哪条边的信息还不行，还需要知道判断是基于这条边的其中的哪一段。
+	// 比如：polyA的某条边可以进入polyB和polyC，区分在于polyB占用的是bmin=0 bmax=100，而polyC占用的则是bmin=101 bmax=255
 	unsigned char side;				///< If a boundary link, defines on which side the link is.
 	unsigned char bmin;				///< If a boundary link, defines the minimum sub-edge area.
 	unsigned char bmax;				///< If a boundary link, defines the maximum sub-edge area.

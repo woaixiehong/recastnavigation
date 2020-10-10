@@ -338,6 +338,8 @@ inline float dtVperp2D(const float* u, const float* v)
 /// @return The signed xz-plane area of the triangle.
 inline float dtTriArea2D(const float* a, const float* b, const float* c)
 {
+	// xiehong：计算叉积，如果返回时正数表示abc顺时针，否则时逆时针
+	// ab X ac，在右手坐标系中，x-z平面叉乘，返回y轴值，为正表示ac在ab右边（abc顺时针），负表示ac在ab左边（abc逆时针）
 	const float abx = b[0] - a[0];
 	const float abz = b[2] - a[2];
 	const float acx = c[0] - a[0];

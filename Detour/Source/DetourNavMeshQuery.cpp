@@ -567,6 +567,7 @@ dtStatus dtNavMeshQuery::closestPointOnPolyBoundary(dtPolyRef ref, const float* 
 	}
 	else
 	{
+		// xiehong：如果这个点不在多边形上，则遍历到每条边的距离，返回最近的点（通过edget可以算出来pos到每条边上最近距离的点的位置）
 		// Point is outside the polygon, dtClamp to nearest edge.
 		float dmin = edged[0];
 		int imin = 0;
@@ -1051,6 +1052,8 @@ dtStatus dtNavMeshQuery::findPath(dtPolyRef startRef, dtPolyRef endRef,
 			}
 			
 			// If the node is visited the first time, calculate node position.
+			// xiehong：实在搞不懂，为什么这里要判断flags，第二次进来pos应该修正一下才对
+			// 如果neibour是跨tile的crossSide会保证neighbourNode是新一个，但如果不是呢？？
 			if (neighbourNode->flags == 0)
 			{
 				getEdgeMidPoint(bestRef, bestPoly, bestTile,
@@ -1265,6 +1268,21 @@ dtStatus dtNavMeshQuery::updateSlicedFindPath(const int maxIter, int* doneIters)
 	dtRaycastHit rayHit;
 	rayHit.maxPath = 0;
 		
+	// xiehong： A*算法执行maxIter次，或者找不到合适的下一个点为止
+	// m_openList里初始化放入的是路径起点
+	// while循环每次处理一个node（也就是一个poly），处理的都是从openlist中pop的一个（total最小的那个）
+	// 处理之前会先关闭这个node（DT_NODE_CLOSED），表示这个是已经处理完的node
+	// 如果当前处理的poly正好是终点poly，则也直接跳出循环
+	// 如果当前处理的poly不合法，也结束
+	// 如果存在父亲node，甚至祖父node，都需要判断一下，它们还在不在，如果不在也结束
+	// 父亲或祖父node加入的时候肯定是在的，但是这个方法的使用方式之一就是每个tick调一次，这就有可能出现异步更新tile导致某些poly不存在的问题
+	// 如果设置了DT_FINDPATH_ANY_ANGLE，则会额外启动一个功能：tryLOS，这个功能会使用到刚才查出来的父亲或祖父node
+	// 这个功能会在A*算法的结果基础上寻找一些捷径，当当前node的入口pos和父亲node的入口pos距离小于50倍玩家半径时，启动捷径计算算法
+	// while循环处理的node的主要处理逻辑为，循环遍历node的每一条边，找出边的另一侧的poly，并计算这个新poly的入口pos，然后打开这个poly对应的node（DT_NODE_OPEN）
+	//		有可能当前poly某条边的另一侧没有poly，也可能poly是filter要过滤的或者就是当前node，还有可能这个poly的父亲节点和当前node的父亲节点是一个，这几种情况都要过滤掉
+	// 启用tryLOS算法后，每次遍历到一条边时，会看直接从父亲node的入口pos到这条边对应的poly入口pos之间的线段是不是联通的，
+	//		是的话就采用这条线段的cost+父亲节点的cost代替原有cost算法
+	
 	int iter = 0;
 	while (iter < maxIter && !m_openList->empty())
 	{
@@ -1358,6 +1376,8 @@ dtStatus dtNavMeshQuery::updateSlicedFindPath(const int maxIter, int* doneIters)
 				continue;
 			}
 			
+			// xiehong：不能有同一个爸爸，但是可以邻居的爸爸是best的爷爷或者祖爷爷或者其他祖先
+			// 注意：有爸爸就表示已经被查过一次了
 			// do not expand to nodes that were already visited from the same parent
 			if (neighbourNode->pidx != 0 && neighbourNode->pidx == bestNode->pidx)
 				continue;
@@ -1365,6 +1385,7 @@ dtStatus dtNavMeshQuery::updateSlicedFindPath(const int maxIter, int* doneIters)
 			// If the node is visited the first time, calculate node position.
 			if (neighbourNode->flags == 0)
 			{
+				// xiehong： 这里设置pos，为什么第二次遍历到这个poly的时候不重新设置位置？？
 				getEdgeMidPoint(bestRef, bestPoly, bestTile,
 								neighbourRef, neighbourPoly, neighbourTile,
 								neighbourNode->pos);
@@ -1379,6 +1400,9 @@ dtStatus dtNavMeshQuery::updateSlicedFindPath(const int maxIter, int* doneIters)
 			rayHit.pathCost = rayHit.t = 0;
 			if (tryLOS)
 			{
+				// xiehong：实际上grandpaRef没什么用，是为了内部调用getCost的时候需要传一个参数，但实际上getCost没用这个参数
+				// 这里就是看bestNode是不是没用，可以直接从parent直达neighbour（捷径）
+				// 但是很有可能捷径的cost反而更大呀？？
 				raycast(parentRef, parentNode->pos, neighbourNode->pos, m_query.filter, DT_RAYCAST_USE_COSTS, &rayHit, grandpaRef);
 				foundShortCut = rayHit.t >= 1.0f;
 			}
@@ -1467,6 +1491,7 @@ dtStatus dtNavMeshQuery::updateSlicedFindPath(const int maxIter, int* doneIters)
 	return m_query.status;
 }
 
+// xiehong：把updateSlicedFindPath已经算出来的结果保存到路径中（从初始poly到lastBestNode，就是已经遍历的所有poly中直线距离最近的那个poly）
 dtStatus dtNavMeshQuery::finalizeSlicedFindPath(dtPolyRef* path, int* pathCount, const int maxPath)
 {
 	if (!pathCount)
@@ -1504,6 +1529,7 @@ dtStatus dtNavMeshQuery::finalizeSlicedFindPath(dtPolyRef* path, int* pathCount,
 		int prevRay = 0;
 		do
 		{
+			// xiehong： 把已经查出来的路径反向
 			dtNode* next = m_nodePool->getNodeAtIdx(node->pidx);
 			node->pidx = m_nodePool->getNodeIdx(prev);
 			prev = node;
@@ -1518,6 +1544,7 @@ dtStatus dtNavMeshQuery::finalizeSlicedFindPath(dtPolyRef* path, int* pathCount,
 		node = prev;
 		do
 		{
+			// xiehong：把已经算好的路径输出到path里，并且如果是通过raycast计算出来的相邻两个点，则再次通过raycast把经过了哪些node都
 			dtNode* next = m_nodePool->getNodeAtIdx(node->pidx);
 			dtStatus status = 0;
 			if (node->flags & DT_NODE_PARENT_DETACHED)
@@ -1557,6 +1584,8 @@ dtStatus dtNavMeshQuery::finalizeSlicedFindPath(dtPolyRef* path, int* pathCount,
 	return DT_SUCCESS | details;
 }
 
+// xiehong：跟上面方法的区别就是路径的终点选取不是直接使用lastBestNode（已遍历的poly中距离终点最近的poly），而是先看看传进来的exsiting数组中是否有合适的poly
+// 当已经有一条现成路径的时候，使用这个方法会把生成的部分路径尽量走到现有路径上去
 dtStatus dtNavMeshQuery::finalizeSlicedFindPathPartial(const dtPolyRef* existing, const int existingSize,
 													   dtPolyRef* path, int* pathCount, const int maxPath)
 {
@@ -1819,6 +1848,8 @@ dtStatus dtNavMeshQuery::findStraightPath(const float* startPos, const float* en
 		
 		for (int i = 0; i < pathSize; ++i)
 		{
+			// xiehong： left和right表示待测试的下一个poly的入口两个端点
+			// portalLeft、portalRight表示当前已测试的poly中，从portalApex可直达的最后一个poly的入口的左右端点
 			float left[3], right[3];
 			unsigned char toType;
 			
@@ -1877,6 +1908,7 @@ dtStatus dtNavMeshQuery::findStraightPath(const float* startPos, const float* en
 			{
 				if (dtVequal(portalApex, portalRight) || dtTriArea2D(portalApex, portalLeft, right) > 0.0f)
 				{
+					// xiehong：这个right点可以从apex点直达
 					dtVcopy(portalRight, right);
 					rightPolyRef = (i+1 < pathSize) ? path[i+1] : 0;
 					rightPolyType = toType;
@@ -1928,6 +1960,7 @@ dtStatus dtNavMeshQuery::findStraightPath(const float* startPos, const float* en
 			{
 				if (dtVequal(portalApex, portalLeft) || dtTriArea2D(portalApex, portalRight, left) < 0.0f)
 				{
+					// xiehong：这个left点可以从apex点直达
 					dtVcopy(portalLeft, left);
 					leftPolyRef = (i+1 < pathSize) ? path[i+1] : 0;
 					leftPolyType = toType;
@@ -2014,6 +2047,8 @@ dtStatus dtNavMeshQuery::findStraightPath(const float* startPos, const float* en
 /// be filled as far as possible from the start position toward the end 
 /// position.
 ///
+// xiehong： 从起点出发，看看能不能走到终点（一直找相邻poly看看是不是能找到一个包含终点的poly）
+// 如果能，resultPos则是endPos，如果不能，则找到距离endPos最近的一个poly的最近的一条边上的最近的点
 dtStatus dtNavMeshQuery::moveAlongSurface(dtPolyRef startRef, const float* startPos, const float* endPos,
 										  const dtQueryFilter* filter,
 										  float* resultPos, dtPolyRef* visited, int* visitedCount, const int maxVisitedSize) const
@@ -2164,6 +2199,8 @@ dtStatus dtNavMeshQuery::moveAlongSurface(dtPolyRef startRef, const float* start
 					const float* vj = &verts[j*3];
 					const float* vi = &verts[i*3];
 					float tseg;
+					// xiehong：这个很关键，如果不设定一个半径，而endPos又不在可用poly内，会导致搜索全部poly
+					// 但也因为这个，如果是很长的U型路径，则用这个会导致搜索出来的终点和路径都不正确
 					float distSqr = dtDistancePtSegSqr2D(searchPos, vj, vi, tseg);
 					if (distSqr > searchRadSqr)
 						continue;
@@ -2264,6 +2301,7 @@ dtStatus dtNavMeshQuery::getPortalPoints(dtPolyRef from, const dtPoly* fromPoly,
 		{
 			if (fromTile->links[i].ref == to)
 			{
+				// xiehong: 当poly类型是OFFMESH_CONNECTION时，它包含的link（从firstlink到最后一个），edge对应的都不是某条边，而是某个坐标，而verts对应的也是某个点
 				const int v = fromTile->links[i].edge;
 				dtVcopy(left, &fromTile->verts[fromPoly->verts[v]*3]);
 				dtVcopy(right, &fromTile->verts[fromPoly->verts[v]*3]);
@@ -3062,6 +3100,7 @@ dtStatus dtNavMeshQuery::getPathFromDijkstraSearch(dtPolyRef endRef, dtPolyRef* 
 /// If the result arrays are is too small to hold the entire result set, they will 
 /// be filled to capacity.
 /// 
+// xiehong： 查找一个点半径内的不重叠poly，重叠的部分取靠近圆心的
 dtStatus dtNavMeshQuery::findLocalNeighbourhood(dtPolyRef startRef, const float* centerPos, const float radius,
 												const dtQueryFilter* filter,
 												dtPolyRef* resultRef, dtPolyRef* resultParent,
@@ -3181,7 +3220,7 @@ dtStatus dtNavMeshQuery::findLocalNeighbourhood(dtPolyRef startRef, const float*
 			const int npa = neighbourPoly->vertCount;
 			for (int k = 0; k < npa; ++k)
 				dtVcopy(&pa[k*3], &neighbourTile->verts[neighbourPoly->verts[k]*3]);
-			
+			// xiehong：如果外围的poly和已经选中的某个poly重叠，还不能把这个外围的poly选入，为什么？
 			bool overlap = false;
 			for (int j = 0; j < n; ++j)
 			{
@@ -3284,6 +3323,10 @@ static void insertInterval(dtSegInterval* ints, int& nints, const int maxInts,
 /// The @p segmentVerts and @p segmentRefs buffers should normally be sized for the 
 /// maximum segments per polygon of the source navigation mesh.
 /// 
+// xiehong： 给定一个poly，返回其所有边是wall还是portal，每条边是wall还是portal的结果放在segmentVerts和segmentRefs里
+// 如果是wall，则返回的segmentRefs[n]=0
+// 如果是portal，则返回的segmentRefs[n]为到达的polyref
+// 之所以逻辑这么麻烦，还是因为如果poly的边是tile边界的情况比较复杂，也就是可能出现一条边的某部分是wall其他部分是portal的情况（这种情况应该非常极端）
 dtStatus dtNavMeshQuery::getPolyWallSegments(dtPolyRef ref, const dtQueryFilter* filter,
 											 float* segmentVerts, dtPolyRef* segmentRefs, int* segmentCount,
 											 const int maxSegments) const
@@ -3373,6 +3416,7 @@ dtStatus dtNavMeshQuery::getPolyWallSegments(dtPolyRef ref, const dtQueryFilter*
 		}
 		
 		// Add sentinels
+		// 对于非tile边界的边，如果是portal，之前就continue了，也不会执行到这里，如果是wall，则这里的逻辑会把整条边都当作wall加入
 		insertInterval(ints, nints, MAX_INTERVAL, -1, 0, 0);
 		insertInterval(ints, nints, MAX_INTERVAL, 255, 256, 0);
 		

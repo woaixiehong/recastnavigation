@@ -25,7 +25,12 @@
 #include "RecastAlloc.h"
 #include "RecastAssert.h"
 
-
+// xiehong：确定一个点的高度和是否是borderVertex，这个点位于4个span的交界处
+// 这个点在本span（由传入xyi确定）通过dir到达的目标span的交界线的右端点（右边是参考dir方向）
+// 这个点的y值 = 其四个方向的span高度最高的y值
+// 这个点是否是borderVertex，是由它周边四个span的属性来决定：
+// 1. 这个点周围的4个span都必须存在（region!=0）
+// 2. 这4个span有两个相邻的是borderspan，而另外两个则是相同area的非borderspan
 static int getCornerHeight(int x, int y, int i, int dir,
 						   const rcCompactHeightfield& chf,
 						   bool& isBorderVertex)
@@ -89,7 +94,7 @@ static int getCornerHeight(int x, int y, int i, int dir,
 		// followed by two interior cells and none of the regions are out of bounds.
 		const bool twoSameExts = (regs[a] & regs[b] & RC_BORDER_REG) != 0 && regs[a] == regs[b];
 		const bool twoInts = ((regs[c] | regs[d]) & RC_BORDER_REG) == 0;
-		const bool intsSameArea = (regs[c]>>16) == (regs[d]>>16);
+		const bool intsSameArea = (regs[c]>>16) == (regs[d]>>16);	// 不一定是同region，同area即可
 		const bool noZeros = regs[a] != 0 && regs[b] != 0 && regs[c] != 0 && regs[d] != 0;
 		if (twoSameExts && twoInts && intsSameArea && noZeros)
 		{
@@ -101,6 +106,12 @@ static int getCornerHeight(int x, int y, int i, int dir,
 	return ch;
 }
 
+// xiehong：计算出原始边界
+// 原始边界的每个点放在points里传出去，主要算法就是围着当前region转一圈
+// points里存放的点的第四个参数（r）含义：
+// 1. 低位表示的是这个点和上一个点（逆时针）组成的线段之外的span的regionid，可能没有就是0
+// 2. 高位RC_BORDER_VERTEX表示这个点是不是一个在border上的点，具体含义见getCornerHeight
+// 3. 高位RC_AREA_BORDER表示这个点和上一个点组成的线段之外的span跟本span是不是同一个area，是的话就是1
 static void walkContour(int x, int y, int i,
 						rcCompactHeightfield& chf,
 						unsigned char* flags, rcIntArray& points)
@@ -124,6 +135,7 @@ static void walkContour(int x, int y, int i,
 			bool isBorderVertex = false;
 			bool isAreaBorder = false;
 			int px = x;
+			// xiehong： y取交接的4个体素中最高的那个
 			int py = getCornerHeight(x, y, i, dir, chf, isBorderVertex);
 			int pz = y;
 			switch(dir)
@@ -221,6 +233,8 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 		}
 	}
 	
+	// xiehong：根据region和area的变化，找出关键的point，作为初始simplified
+	// 初始的simplified数组，每一个点都是region切换的点
 	if (hasConnections)
 	{
 		// The contour has some portals to other regions.
@@ -228,6 +242,7 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 		for (int i = 0, ni = points.size()/4; i < ni; ++i)
 		{
 			int ii = (i+1) % ni;
+			// xiehong：area不一样  reagion肯定不一样，为什么还要考虑area？
 			const bool differentRegs = (points[i*4+3] & RC_CONTOUR_REG_MASK) != (points[ii*4+3] & RC_CONTOUR_REG_MASK);
 			const bool areaBorders = (points[i*4+3] & RC_AREA_BORDER) != (points[ii*4+3] & RC_AREA_BORDER);
 			if (differentRegs || areaBorders)
@@ -240,6 +255,8 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 		}
 	}
 	
+	// xiehong：如果没有关键点（孤岛？）
+	// 找到最左上和最右下的两个点，加入进去，形成一个没有面积的直线（后续逻辑会慢慢撑开）
 	if (simplified.size() == 0)
 	{
 		// If there is no connections at all,
@@ -287,6 +304,9 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 	// Add points until all raw points are within
 	// error tolerance to the simplified shape.
 	const int pn = points.size()/4;
+	// xiehong：遍历任意两个相邻点，
+	// 找到这两个点之间忽略的点（只考虑切换area的点以及所有处于边缘（不可行走边缘）的点）到这两个点之间线段的距离最大的点（注意是点到线段的距离），并记录他到线段的距离
+	// 然后判断距离否大于一个值，如果大于这个值就在simplified里，把这个点插入到这两个点之间
 	for (int i = 0; i < simplified.size()/4; )
 	{
 		int ii = (i+1) % (simplified.size()/4);
@@ -307,6 +327,8 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 		// Traverse the segment in lexilogical order so that the
 		// max deviation is calculated similarly when traversing
 		// opposite segments.
+		// xiehong：这样保证当a.x不等于b.x的时候，从x较小的往x较大的方向遍历
+		// 当x一样的时候，从z较小的往z较大的遍历
 		if (bx > ax || (bx == ax && bz > az))
 		{
 			cinc = 1;
@@ -322,6 +344,9 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 			rcSwap(az, bz);
 		}
 		
+		// 遍历这条边上的每一个被忽略的点（只能是处于不可行走边缘的点及对面是另一个area的点）
+		// 如果第一个点是这样的点，那么后面的点都是这样的点
+		// 这样做的意思是：如果area是一样的，那内部怎么分region其实就无所谓了
 		// Tessellate only outer edges or edges between areas.
 		if ((points[ci*4+3] & RC_CONTOUR_REG_MASK) == 0 ||
 			(points[ci*4+3] & RC_AREA_BORDER))
@@ -365,6 +390,8 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 		}
 	}
 	
+	// 太长就取中点
+	// 只是如果中间时偶数个点的话，会取x或者z较小的点
 	// Split too long edges.
 	if (maxEdgeLen > 0 && (buildFlags & (RC_CONTOUR_TESS_WALL_EDGES|RC_CONTOUR_TESS_AREA_EDGES)) != 0)
 	{
@@ -405,6 +432,7 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 					const int n = bi < ai ? (bi+pn - ai) : (bi - ai);
 					if (n > 1)
 					{
+						// xiehong：lexilogical order？？？
 						if (bx > ax || (bx == ax && bz > az))
 							maxi = (ai + n/2) % pn;
 						else
@@ -451,6 +479,9 @@ static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
 	
 }
 
+// xiehong：计算多边形面积
+// 注意是j->i，所以j->i部分的三角形面积为jz*ix-iz*jx
+// 在从y轴负方向往上看，x-z平面， 多边形顺时针 = 多边形针面积为正
 static int calcAreaOfPolygon2D(const int* verts, const int nverts)
 {
 	int area = 0;
@@ -468,6 +499,7 @@ static int calcAreaOfPolygon2D(const int* verts, const int nverts)
 inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
 inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
 
+// ax*cz - cx*az（注意这里可能有点歧义，计算出来的面积应该*-1才对，因为叉乘公式计算Y值是cx*az-ax*cz）
 inline int area2(const int* a, const int* b, const int* c)
 {
 	return (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
@@ -489,6 +521,9 @@ inline bool left(const int* a, const int* b, const int* c)
 	return area2(a, b, c) < 0;
 }
 
+// xiehong 判断从y轴正方向看，x-z平面，c是否在ab左边，或者a->b->c是否是逆时针
+// 右手坐标系下
+// 注：area2计算出来的Y是反的，所以跟右手螺旋看相反，如果area2没反的话，应该是area2(a, b, c) >= 0
 inline bool leftOn(const int* a, const int* b, const int* c)
 {
 	return area2(a, b, c) <= 0;
@@ -562,6 +597,7 @@ static bool intersectSegCountour(const int* d0, const int* d1, int i, int n, con
 	return false;
 }
 
+// 从y轴正方向看，x-z平面
 static bool	inCone(int i, int n, const int* verts, const int* pj)
 {
 	const int* pi = &verts[i * 4];
@@ -576,7 +612,7 @@ static bool	inCone(int i, int n, const int* verts, const int* pj)
 	return !(leftOn(pi, pj, pi1) && leftOn(pj, pi, pin1));
 }
 
-
+// xiehong：移除在x-z平面重叠的相邻点其中之一
 static void removeDegenerateSegments(rcIntArray& simplified)
 {
 	// Remove adjacent vertices which are equal on xz-plane,
@@ -612,6 +648,7 @@ static bool mergeContours(rcContour& ca, rcContour& cb, int ia, int ib)
 	
 	int nv = 0;
 	
+	// xiehong：注意这里时小于等于，意思是走完最后一个点以后，还要回到第一个点
 	// Copy contour A.
 	for (int i = 0; i <= ca.nverts; ++i)
 	{
@@ -757,6 +794,12 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 			//   |
 			// j o-----o j+1
 			//         :
+
+			// xiehong：注：这个图是从y轴正方向看x-z平面，我觉得从y轴负方向看会舒服一点，因为这样z轴是朝上的
+
+			// 针对本hole上每一个corner
+			// 找出outline上距离corner最近的，并且连线（与corner）与outline的其他边或其他hole不相交的点
+			// 从leftmost的点开始找
 			int ndiags = 0;
 			const int* corner = &hole->verts[bestVertex*4];
 			for (int j = 0; j < outline->nverts; j++)
@@ -778,6 +821,7 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 			for (int j = 0; j < ndiags; j++)
 			{
 				const int* pt = &outline->verts[diags[j].vert*4];
+				// xiehong：这里写错了吧？diags[i]应该是diags[j]吧？？
 				bool intersect = intersectSegCountour(pt, corner, diags[i].vert, outline->nverts, outline->verts);
 				for (int k = i; k < region.nholes && !intersect; k++)
 					intersect |= intersectSegCountour(pt, corner, -1, region.holes[k].contour->nverts, region.holes[k].contour->verts);
@@ -821,6 +865,12 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 /// See the #rcConfig documentation for more information on the configuration parameters.
 ///
 /// @see rcAllocContourSet, rcCompactHeightfield, rcContourSet, rcConfig
+
+// xiehong：注意方向
+// 从y轴负方向往上看x-z平面，边界应该是顺时针转，面积为正
+// 但是里面原作者的一些示例是逆时针，没错，那是从y轴正方向往下看，面积还是为正
+// 但是从y轴负方向往上看的话，x-z平面的z是冲着上面的，比较舒服
+// 而从y轴正方向往下看，z轴是冲下的，有点别扭，所以我倾向于从y轴负方向往上看来分析
 bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 					 const float maxError, const int maxEdgeLen,
 					 rcContourSet& cset, const int buildFlags)
@@ -866,6 +916,8 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 	
 	ctx->startTimer(RC_TIMER_BUILD_CONTOURS_TRACE);
 	
+	// xiehong：准备工作
+	// 先把每个span的四个方向是不是会进入其他region记录到flags了，0表示不会，1表示会
 	// Mark boundaries.
 	for (int y = 0; y < h; ++y)
 	{
@@ -895,6 +947,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 						res |= (1 << dir);
 				}
 				flags[i] = res ^ 0xf; // Inverse, mark non connected edges.
+				// 异或完后，每一位1表示对应方向是不同region，0表示相同region
 			}
 		}
 	}
@@ -913,6 +966,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 			{
 				if (flags[i] == 0 || flags[i] == 0xf)
 				{
+					// 如果有一个span四周的region都不同，那应该早就在上一步被合并掉了
 					flags[i] = 0;
 					continue;
 				}
@@ -1020,6 +1074,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 		{
 			rcContour& cont = cset.conts[i];
 			// If the contour is wound backwards, it is a hole.
+			// xiehong：右手坐标系，表示从y轴负方向往上看x-z平面，如果是顺时针的环，则返回正数
 			winding[i] = calcAreaOfPolygon2D(cont.verts, cont.nverts) < 0 ? -1 : 1;
 			if (winding[i] < 0)
 				nholes++;

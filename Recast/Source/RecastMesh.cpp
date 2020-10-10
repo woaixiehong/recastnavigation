@@ -31,6 +31,10 @@ struct rcEdge
 	unsigned short poly[2];
 };
 
+// xiehong：创建联通信息，放在polys的后半部分
+// 传进来的polys是mesh.polys，它每个poly预留的空间是2倍nvp，后一个nvp用来存储联通信息
+// 每个poly的联通信息具体就是:
+// 与poly的前一个nvp表示的顶点数组对应，后一个nvp表示的是这个顶点到下一个顶点的边，的另一边的poly的下标
 static bool buildMeshAdjacency(unsigned short* polys, const int npolys,
 							   const int nverts, const int vertsPerPoly)
 {
@@ -62,6 +66,8 @@ static bool buildMeshAdjacency(unsigned short* polys, const int npolys,
 			if (t[j] == RC_MESH_NULL_IDX) break;
 			unsigned short v0 = t[j];
 			unsigned short v1 = (j+1 >= vertsPerPoly || t[j+1] == RC_MESH_NULL_IDX) ? t[0] : t[j+1];
+			// xiehong：v0<v1是为了去重，如果没有的话，会多出一倍边
+			// 因为所有多边形的方向都是相同的，所以重合的边一定是在临接的两个多边形上方向相反
 			if (v0 < v1)
 			{
 				rcEdge& edge = edges[edgeCount];
@@ -87,6 +93,7 @@ static bool buildMeshAdjacency(unsigned short* polys, const int npolys,
 			if (t[j] == RC_MESH_NULL_IDX) break;
 			unsigned short v0 = t[j];
 			unsigned short v1 = (j+1 >= vertsPerPoly || t[j+1] == RC_MESH_NULL_IDX) ? t[0] : t[j+1];
+			// 这里把边里的对面多边形信息补上
 			if (v0 > v1)
 			{
 				for (unsigned short e = firstEdge[v1]; e != RC_MESH_NULL_IDX; e = nextEdge[e])
@@ -134,6 +141,8 @@ inline int computeVertexHash(int x, int y, int z)
 	return (int)(n & (VERTEX_BUCKET_COUNT-1));
 }
 
+// first表示这个x-z确定的某个桶的第一个元素在vert数组的下标
+// next表示某个桶的下一个，比如已知顶点i，next[i]就是，与顶点i的x、z相同的下一个顶点，以-1结束
 static unsigned short addVertex(unsigned short x, unsigned short y, unsigned short z,
 								unsigned short* verts, int* firstVert, int* nextVert, int& nv)
 {
@@ -164,6 +173,7 @@ static unsigned short addVertex(unsigned short x, unsigned short y, unsigned sho
 inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
 inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
 
+// xiehong：a、b、c组成的三角形面积，逆时针为正数，顺时针为负数，0表示在一条直线上
 inline int area2(const int* a, const int* b, const int* c)
 {
 	return (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
@@ -198,9 +208,11 @@ inline bool collinear(const int* a, const int* b, const int* c)
 //	Returns true iff ab properly intersects cd: they share
 //	a point interior to both segments.  The properness of the
 //	intersection is ensured by using strict leftness.
+// xiehong：判断两条线段是否相交
 static bool intersectProp(const int* a, const int* b, const int* c, const int* d)
 {
 	// Eliminate improper cases.
+	// xiehong： 每条线段的端点不能在另外那条线段或其延长线上
 	if (collinear(a,b,c) || collinear(a,b,d) ||
 		collinear(c,d,a) || collinear(c,d,b))
 		return false;
@@ -210,6 +222,7 @@ static bool intersectProp(const int* a, const int* b, const int* c, const int* d
 
 // Returns T iff (a,b,c) are collinear and point c lies 
 // on the closed segement ab.
+// xiehong：判断一个点在某条线段上
 static bool between(const int* a, const int* b, const int* c)
 {
 	if (!collinear(a, b, c))
@@ -240,6 +253,7 @@ static bool vequal(const int* a, const int* b)
 
 // Returns T iff (v_i, v_j) is a proper internal *or* external
 // diagonal of P, *ignoring edges incident to v_i and v_j*.
+// xiehong：判断多边形的某个对角线是否跟多边形的某条边相交（不包括一条线段端点正好落在另一条线段之上的情况）
 static bool diagonalie(int i, int j, int n, const int* verts, int* indices)
 {
 	const int* d0 = &verts[(indices[i] & 0x0fffffff) * 4];
@@ -267,6 +281,7 @@ static bool diagonalie(int i, int j, int n, const int* verts, int* indices)
 
 // Returns true iff the diagonal (i,j) is strictly internal to the 
 // polygon P in the neighborhood of the i endpoint.
+// xiehong：判断多边形的某个对角线的其中一个端点是否在这个端点相邻的两条边组成的多边形内角之内
 static bool	inCone(int i, int j, int n, const int* verts, int* indices)
 {
 	const int* pi = &verts[(indices[i] & 0x0fffffff) * 4];
@@ -284,6 +299,7 @@ static bool	inCone(int i, int j, int n, const int* verts, int* indices)
 
 // Returns T iff (v_i, v_j) is a proper internal
 // diagonal of P.
+// xiehong：判断一个多边形的某条对角线是否整条线段都在多边形覆盖范围之内
 static bool diagonal(int i, int j, int n, const int* verts, int* indices)
 {
 	return inCone(i, j, n, verts, indices) && diagonalie(i, j, n, verts, indices);
@@ -335,7 +351,8 @@ static bool diagonalLoose(int i, int j, int n, const int* verts, int* indices)
 	return inConeLoose(i, j, n, verts, indices) && diagonalieLoose(i, j, n, verts, indices);
 }
 
-
+// xiehong：把多边形拆解为多个三角形，找最短内部对角线划分法
+// indices表示在while循环过程中，当前还剩下的多边形的顶点下标到verts下标的映射
 static int triangulate(int n, const int* verts, int* indices, int* tris)
 {
 	int ntris = 0;
@@ -346,6 +363,7 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 	{
 		int i1 = next(i, n);
 		int i2 = next(i1, n);
+		// xiehong：每个点对应的对角线（由其前后两个端点组成）是否对于多边形是一个完全的内部线段
 		if (diagonal(i, i2, n, verts, indices))
 			indices[i1] |= 0x80000000;
 	}
@@ -376,6 +394,7 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 		
 		if (mini == -1)
 		{
+			// xiehong：这里我没搞清楚，是出现了什么情况，为什么会出现这种情况？？
 			// We might get here because the contour has overlapping segments, like this:
 			//
 			//  A o-o=====o---o B
@@ -427,6 +446,7 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 		for (int k = i1; k < n; k++)
 			indices[k] = indices[k+1];
 		
+		// 右可能之前i是n-1所以要这样弄一下
 		if (i1 >= n) i1 = 0;
 		i = prev(i1,n);
 		// Update diagonal flags.
@@ -464,6 +484,11 @@ inline bool uleft(const unsigned short* a, const unsigned short* b, const unsign
 		   ((int)c[0] - (int)a[0]) * ((int)b[2] - (int)a[2]) < 0;
 }
 
+// xiehong：找出两个poly是否存在两条重合的边，如果通过重合边合体的新poly还是凸多边形的话，返回边长平方
+// 判断重合的条件并不是看点的坐标,而是看对应verts的下标是否一致
+// 这是因为在之前的方法里就把x、z相同 y差距<=2的当成了一个点处理了，所以下标相同的肯定点相同，不用去判断x、y、z是否相同
+// nvp为每个多边形最多几个顶点
+// ea和eb分别为两个多边形的重叠线段上的起点（因为都是逆时针，所以肯定是两个不同的点）
 static int getPolyMergeValue(unsigned short* pa, unsigned short* pb,
 							 const unsigned short* verts, int& ea, int& eb,
 							 const int nvp)
@@ -479,6 +504,9 @@ static int getPolyMergeValue(unsigned short* pa, unsigned short* pb,
 	ea = -1;
 	eb = -1;
 	
+	// xiehong：找出来的必然是两个点，在poly a里的ea和poly b里的eb分别是重合线段的两个端点
+	// 因为a是在外层遍历的，所以ea在a上肯定是重合线段的起点
+	// 同理eb也是b上重合线段的起点
 	for (int i = 0; i < na; ++i)
 	{
 		unsigned short va0 = pa[i];
@@ -565,6 +593,7 @@ static bool canRemoveVertex(rcContext* ctx, rcPolyMesh& mesh, const unsigned sho
 {
 	const int nvp = mesh.nvp;
 	
+	// xiehong：删了点之后不能导致连两条边都没有了
 	// Count number of polygons to remove.
 	int numRemovedVerts = 0;
 	int numTouchedVerts = 0;
@@ -607,7 +636,8 @@ static bool canRemoveVertex(rcContext* ctx, rcPolyMesh& mesh, const unsigned sho
 		ctx->log(RC_LOG_WARNING, "canRemoveVertex: Out of memory 'edges' (%d).", maxEdges*3);
 		return false;
 	}
-		
+
+	// xiehong：找出这个点对应的所有边，e[2]记录这条边是属于一个poly还是两个poly
 	for (int i = 0; i < mesh.npolys; ++i)
 	{
 		unsigned short* p = &mesh.polys[i*nvp*2];
@@ -657,6 +687,8 @@ static bool canRemoveVertex(rcContext* ctx, rcPolyMesh& mesh, const unsigned sho
 		if (edges[i*3+2] < 2)
 			numOpenEdges++;
 	}
+
+	// xiehong：删的点不能是多余两个open edge的点，open edge的意思是某个poly独有的edge
 	if (numOpenEdges > 2)
 		return false;
 	
@@ -777,7 +809,14 @@ static bool removeVertex(rcContext* ctx, rcPolyMesh& mesh, const unsigned short 
 	pushBack(edges[0], hole, nhole);
 	pushBack(edges[2], hreg, nhreg);
 	pushBack(edges[3], harea, nharea);
-	
+
+	// xiehong：hole表示去掉vertex后新生成的一个多边形
+	// 这个循环就是构建这个多边形的过程
+	// 上面代码先插入一个点
+	// 然后循环遍历之前记录的每条边
+	// 如果找到一条边的a点与hole的最后的顶点是一个点，则把这条边的b点插入hole的最后面
+	// 如果找到一条边的b点与hole的第一个顶点是一个点，则把这条边的a点插入hole的最前面
+	// 当没有边可插入的时候，自然就形成了一个环
 	while (nedges)
 	{
 		bool match = false;
@@ -854,6 +893,7 @@ static bool removeVertex(rcContext* ctx, rcPolyMesh& mesh, const unsigned short 
 		thole[i] = i;
 	}
 
+	// xiehong：hole可以看成是BuildContour那一步生成的轮廓，以下是对这个边再次执行一次三角化和三角形合成多边形算法
 	// Triangulate the hole.
 	int ntris = triangulate(nhole, &tverts[0], &thole[0], tris);
 	if (ntris < 0)
@@ -1109,6 +1149,9 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 			continue;
 		
 		// Triangulate contour
+		// xiehong：indices是个中间变量，主要是用来映射原始的cont.verts下标到【去重过】的mesh.verts下标
+		// 最终通过addVertex赋值，会完全覆盖初始值
+		// 比如tris用的就是原始的verts下标，而后面的poly则将使用mesh.verts的下标
 		for (int j = 0; j < cont.nverts; ++j)
 			indices[j] = j;
 			
@@ -1143,6 +1186,7 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 			}
 		}
 
+		// xiehong：初始化一个三角形就是一个poly，但是poly的顶点预留了nvp个的空间
 		// Build initial polygons.
 		int npolys = 0;
 		memset(polys, 0xff, maxVertsPerCont*nvp*sizeof(unsigned short));
@@ -1168,7 +1212,8 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 				// Find best polygons to merge.
 				int bestMergeVal = 0;
 				int bestPa = 0, bestPb = 0, bestEa = 0, bestEb = 0;
-				
+
+				// xiehong：遍历所有的合并可能性，找到合并将会消除的边最长的那个方案，并执行合并
 				for (int j = 0; j < npolys-1; ++j)
 				{
 					unsigned short* pj = &polys[j*nvp];
@@ -1195,6 +1240,7 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 					unsigned short* pb = &polys[bestPb*nvp];
 					mergePolyVerts(pa, pb, bestEa, bestEb, tmpPoly, nvp);
 					unsigned short* lastPoly = &polys[(npolys-1)*nvp];
+					// 把poly b消灭了，就把最后一个poly拷到原来b的位置
 					if (pb != lastPoly)
 						memcpy(pb, lastPoly, sizeof(unsigned short)*nvp);
 					npolys--;
@@ -1207,6 +1253,8 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 			}
 		}
 		
+		// xiehong：这里需要注意的是
+		// polys数组预留的每个poly大小为nvp，而mesh.polys为每个poly预留的大小是nvp*2
 		// Store polygons.
 		for (int j = 0; j < npolys; ++j)
 		{
@@ -1255,6 +1303,7 @@ bool rcBuildPolyMesh(rcContext* ctx, rcContourSet& cset, const int nvp, rcPolyMe
 		return false;
 	}
 	
+	// xiehong：与tile border相邻的边因为对面也没有poly（上一步生成边界的时候把poly所在的region过滤掉了），特殊标记一下
 	// Find portal edges
 	if (mesh.borderSize > 0)
 	{

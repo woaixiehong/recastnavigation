@@ -41,6 +41,7 @@ inline bool overlapSlabs(const float* amin, const float* amax,
 		return false;
 	
 	// Check vertical overlap.
+	// xiehong: 这里是计算出直线方程（y = dx + k）的d和k
 	const float ad = (amax[1]-amin[1]) / (amax[0]-amin[0]);
 	const float ak = amin[1] - ad*amin[0];
 	const float bd = (bmax[1]-bmin[1]) / (bmax[0]-bmin[0]);
@@ -481,6 +482,7 @@ void dtNavMesh::connectExtOffMeshLinks(dtMeshTile* tile, dtMeshTile* target, int
 		// findNearestPoly may return too optimistic results, further check to make sure. 
 		if (dtSqr(nearestPt[0]-p[0])+dtSqr(nearestPt[2]-p[2]) > dtSqr(targetCon->rad))
 			continue;
+		// xiehong：设置offmesh poly的终点位置（只是最靠近用户设置终点的位置）
 		// Make sure the location is on current mesh.
 		float* v = &target->verts[targetPoly->verts[1]*3];
 		dtVcopy(v, nearestPt);
@@ -618,6 +620,7 @@ void dtNavMesh::baseOffMeshLinks(dtMeshTile* tile)
 
 namespace
 {
+	// xiehong： 遍历poly每条边，找出距离一个点最近的点
 	template<bool onlyBoundary>
 	void closestPointOnDetailEdges(const dtMeshTile* tile, const dtPoly* poly, const float* pos, float* closest)
 	{
@@ -695,15 +698,19 @@ bool dtNavMesh::getPolyHeight(const dtMeshTile* tile, const dtPoly* poly, const 
 	if (!height)
 		return true;
 	
+	// xiehong：先找到x-z平面是不是poly包含pos，是的话，就用这个点到这个平面的y方向投影点的y值
 	// Find height at the location.
 	for (int j = 0; j < pd->triCount; ++j)
 	{
+		// xiehong: pd带表的是这个poly又可以分为几个三角形的数据。
+		// 而这些三角形数据在tile->detailTris中是按顺序存储的，所以pd只需要记录triBase即可
+		// 这些三角形数据也只是记录到vert的索引
 		const unsigned char* t = &tile->detailTris[(pd->triBase+j)*4];
-		const float* v[3];
+		const float* v[3];	// 代表poly中的每一个三角形
 		for (int k = 0; k < 3; ++k)
 		{
 			if (t[k] < poly->vertCount)
-				v[k] = &tile->verts[poly->verts[t[k]]*3];
+				v[k] = &tile->verts[poly->verts[t[k]]*3];	// xiehong：通过poly->verts索引真实坐标要乘以3
 			else
 				v[k] = &tile->detailVerts[(pd->vertBase+(t[k]-poly->vertCount))*3];
 		}
@@ -715,6 +722,9 @@ bool dtNavMesh::getPolyHeight(const dtMeshTile* tile, const dtPoly* poly, const 
 		}
 	}
 
+	// xiehong：为什么会运行到这里还需要再想一想
+	// 遍历一下poly中所有三角形，找到最近的那个点的y值
+	// 计算最近点时，只关心x-z平面，最终返回的是最近点的y
 	// If all triangle checks failed above (can happen with degenerate triangles
 	// or larger floating point values) the point is on an edge, so just select
 	// closest. This should almost never happen so the extra iteration here is
@@ -725,6 +735,7 @@ bool dtNavMesh::getPolyHeight(const dtMeshTile* tile, const dtPoly* poly, const 
 	return true;
 }
 
+// xiehong：找到一个poly上距离某个点最近的点，分为是否覆盖pos的两种情况
 void dtNavMesh::closestPointOnPoly(dtPolyRef ref, const float* pos, float* closest, bool* posOverPoly) const
 {
 	const dtMeshTile* tile = 0;
@@ -1006,6 +1017,10 @@ dtStatus dtNavMesh::addTile(unsigned char* data, int dataSize, int flags,
 
 	connectIntLinks(tile);
 
+	// xiehong： Offmesh 的表达方式为：存在一个特殊的poly，这个poly只有两个端点，也就是这个poly不是一个多边形，而是一个线段
+	// 要注意，这个poly并不是起点的poly，也不是终点的poly，它就是一条线段，起点poly是一个多边形，终点poly也是一个多边形
+	// baseOffMeshLinks是创建起点poly和offmesh poly之间的关联（dtLink）
+	// connectExtOffMeshLinks是创建offmesh poly和终点poly之间的关联（dtLink）
 	// Base off-mesh connections to their starting polygons and connect connections inside the tile.
 	baseOffMeshLinks(tile);
 	connectExtOffMeshLinks(tile, tile, -1);
@@ -1022,6 +1037,7 @@ dtStatus dtNavMesh::addTile(unsigned char* data, int dataSize, int flags,
 		if (neis[j] == tile)
 			continue;
 	
+		// xiehong：好像不会进这里，逻辑上进入这里也说不通，需要问问大神？？
 		connectExtLinks(tile, neis[j], -1);
 		connectExtLinks(neis[j], tile, -1);
 		connectExtOffMeshLinks(tile, neis[j], -1);

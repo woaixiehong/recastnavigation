@@ -23,6 +23,9 @@
 
 enum dtNodeFlags
 {
+	// xiehong：对于寻路来说：门已打开的poly（设置了pos，计算过cost、total），则加入OPEN列表，同时设置为OPEN状态
+	// 已经计算完了所有的相邻poly，则处于CLOSED状态（处理的时候会弹出OPEN列表）
+	// 除了寻路还有其他情况用到这个枚举
 	DT_NODE_OPEN = 0x01,
 	DT_NODE_CLOSED = 0x02,
 	DT_NODE_PARENT_DETACHED = 0x04, // parent of the node is not adjacent. Found using raycast.
@@ -35,6 +38,7 @@ static const int DT_NODE_PARENT_BITS = 24;
 static const int DT_NODE_STATE_BITS = 2;
 struct dtNode
 {
+	// xiehong： pos是路径进入这个多边形的入口（offmesh情况还没看）
 	float pos[3];								///< Position of the node.
 	float cost;									///< Cost from previous node to current node.
 	float total;								///< Cost up to the node.

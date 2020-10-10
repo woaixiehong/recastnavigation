@@ -182,6 +182,8 @@ static float distToTriMesh(const float* p, const float* verts, const int /*nvert
 	return dmin;
 }
 
+// xiehong：只判断x-z平面投影，距离为最小的点到多边形各条线段距离
+// 如果在多边形之内，则取负值
 static float distToPoly(int nvert, const float* verts, const float* p)
 {
 	
@@ -209,6 +211,10 @@ static unsigned short getHeight(const float fx, const float fy, const float fz,
 	ix = rcClamp(ix-hp.xmin, 0, hp.width - 1);
 	iz = rcClamp(iz-hp.ymin, 0, hp.height - 1);
 	unsigned short h = hp.data[ix+iz*hp.width];
+
+	// xiehong：什么情况下会进这里？？
+	// 如果当前点找不到高度，则一圈一圈往外转，每转一圈看看当前圈能不能找到一个有高度的值，如果有多个就取跟fy最接近的
+	// fy是外层通过线性插值的出来的值
 	if (h == RC_UNSET_HEIGHT)
 	{
 		// Special case when data might be bad.
@@ -338,7 +344,7 @@ static int overlapSegSeg2d(const float* a, const float* b, const float* c, const
 	if (a1*a2 < 0.0f)
 	{
 		float a3 = vcross2(c, d, a);
-		float a4 = a3 + a2 - a1;
+		float a4 = a3 + a2 - a1;	// 相当于a4 = vcross2(c, d, b); 根据面积得出
 		if (a3 * a4 < 0.0f)
 			return 1;
 	}
@@ -360,6 +366,8 @@ static bool overlapEdges(const float* pts, const int* edges, int nedges, int s1,
 	return false;
 }
 
+// xiehong：执行得劳内算法
+// 注意如果一条边的左边已经确定了的话，计算右边的时候会把这条边的起点终点反向，看成计算左边的内容
 static void completeFacet(rcContext* ctx, const float* pts, int npts, int* edges, int& nedges, const int maxEdges, int& nfaces, int e)
 {
 	static const float EPS = 1e-5f;
@@ -391,6 +399,8 @@ static void completeFacet(rcContext* ctx, const float* pts, int npts, int* edges
 	for (int u = 0; u < npts; ++u)
 	{
 		if (u == s || u == t) continue;
+		// xiehong：u是否在st左边，这里观察方向又回到了从y轴负方向从下往上看（z轴朝上）
+		// 注意：s和t有可能反向了
 		if (vcross2(&pts[s*3], &pts[t*3], &pts[u*3]) > EPS)
 		{
 			if (r < 0)
@@ -435,6 +445,7 @@ static void completeFacet(rcContext* ctx, const float* pts, int npts, int* edges
 		updateLeftFace(&edges[e*4], s, t, nfaces);
 		
 		// Add new edge or update face info of old edge.
+		// xiehong：这里也要注意s 和t可能已经反向了，别搞错了，新加入的边，左边永远是新生成的三角形
 		e = findEdge(edges, nedges, pt, s);
 		if (e == EV_UNDEF)
 		    addEdge(ctx, edges, nedges, maxEdges, pt, s, nfaces, EV_UNDEF);
@@ -483,6 +494,9 @@ static void delaunayHull(rcContext* ctx, const int npts, const float* pts,
 	for (int i = 0; i < nfaces*4; ++i)
 		tris[i] = -1;
 	
+	// xiehong： edge的第2和第3个参数分别表示这个edge属于哪个三角形（tris下标）
+	// 第2个参数表示左边的三角形，第3个参数表示右边的三角形（从y轴正方向往下看x-z平面）
+	// 第1和第2个参数才表示这个edge的顶点（verts下标）
 	for (int i = 0; i < nedges; ++i)
 	{
 		const int* e = &edges[i*4];
@@ -535,6 +549,8 @@ static void delaunayHull(rcContext* ctx, const int npts, const float* pts,
 // Calculate minimum extend of the polygon.
 static float polyMinExtent(const float* verts, const int nverts)
 {
+	// xiehong： 每一条边都有一个点距离这条边最远，这个距离叫做Extent
+	// 遍历每条边，找出最小的Extent并返回
 	float minDist = FLT_MAX;
 	for (int i = 0; i < nverts; i++)
 	{
@@ -557,6 +573,7 @@ static float polyMinExtent(const float* verts, const int nverts)
 inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
 inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
 
+// xiehong： 把多边形划分为三角形的一种算法，大致是按三角形周长最小的算法来分割
 static void triangulateHull(const int /*nverts*/, const float* verts, const int nhull, const int* hull, const int nin, rcIntArray& tris)
 {
 	int start = 0, left = 1, right = nhull-1;
@@ -566,6 +583,7 @@ static void triangulateHull(const int /*nverts*/, const float* verts, const int 
 	float dmin = FLT_MAX;
 	for (int i = 0; i < nhull; i++)
 	{
+		// 由于后续算法都是基于这个点的左或者右顶点来计算，这个点就不能是新加入的y轴调整点，这样可以预防这个点和左右点合起来是一条线的问题
 		if (hull[i] >= nin) continue; // Ears are triangles with original vertices as middle vertex while others are actually line segments on edges
 		int pi = prev(i, nhull);
 		int ni = next(i, nhull);
@@ -667,6 +685,9 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 	// seamless height values across the ply boundaries.
 	if (sampleDist > 0)
 	{
+		// xiehong：这一步是处理多边形的边，nin是顶点数量
+		// 尝试verts里加入符合条件的采样点
+		// 最终往verts里加入了一些点，并生成了poly的轮廓hull（这个包括新加入的点下标）
 		for (int i = 0, j = nin-1; i < nin; j=i++)
 		{
 			const float* vj = &in[j*3];
@@ -695,6 +716,7 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 			float dy = vi[1] - vj[1];
 			float dz = vi[2] - vj[2];
 			float d = sqrtf(dx*dx + dz*dz);
+			// xiehong：nn表示采样数量
 			int nn = 1 + (int)floorf(d/sampleDist);
 			if (nn >= MAX_VERTS_PER_EDGE) nn = MAX_VERTS_PER_EDGE-1;
 			if (nverts+nn >= MAX_VERTS)
@@ -712,6 +734,11 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 			// Simplify samples.
 			int idx[MAX_VERTS_PER_EDGE] = {0,nn};
 			int nidx = 2;
+			// xiehong：初始化为poly边的两个端点，挨个检查每个中间点
+			// 如果一次遍历下来，发现了两个端点之间有某个点跟真实y值差距过大，则把这个点作为中间点，然后拆分成两个线段
+			// 再一次检查这两个线段的中间点，如果再次发现有y值差距过大的，则再次加入，就拆分成了三个线段。
+			// 如此往复直到没有
+			// 注：每个线段的检查都是需要遍历这个线段经过的所有点，找偏离最大的点
 			for (int k = 0; k < nidx-1; )
 			{
 				const int a = idx[k];
@@ -723,6 +750,8 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 				int maxi = -1;
 				for (int m = a+1; m < b; ++m)
 				{
+					// xiehong：遍历采样线段上，每个点（按照真实高度修复了y值后），到采样线段的距离
+					// 注意这里采样线段的两个端点也是按真实y值算的
 					float dev = distancePtSeg(&edge[m*3],va,vb);
 					if (dev > maxd)
 					{
@@ -745,6 +774,8 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 				}
 			}
 			
+			// xiehong： 把符合条件的采样点加入到verts里
+			// 同时在多边形轮廓（hull）里加入这个采样点的下标，其中j是poly原始边起点下标，nverts是新加入的顶点下标
 			hull[nhull++] = j;
 			// Add new vertices.
 			if (swapped)
@@ -790,6 +821,7 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 	
 	if (sampleDist > 0)
 	{
+		// xiehong：这一步是处理多边形的内部
 		// Create sample locations in a grid.
 		float bmin[3], bmax[3];
 		rcVcopy(bmin, in);
@@ -813,6 +845,7 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 				pt[1] = (bmax[1]+bmin[1])*0.5f;
 				pt[2] = z*sampleDist;
 				// Make sure the samples are not too close to the edges.
+				// xiehong：超出poly的采样点都会被排除掉
 				if (distToPoly(nin,in,pt) > -sampleDist/2) continue;
 				samples.push(x);
 				samples.push(getHeight(pt[0], pt[1], pt[2], cs, ics, chf.ch, heightSearchRadius, hp));
@@ -834,6 +867,7 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 			float bestpt[3] = {0,0,0};
 			float bestd = 0;
 			int besti = -1;
+			// xiehong：循环所有的采样点，找到距离真实y值最大的点
 			for (int i = 0; i < nsamples; ++i)
 			{
 				const int* s = &samples[i*4];
@@ -866,6 +900,7 @@ static bool buildPolyDetail(rcContext* ctx, const float* in, const int nin,
 			// TODO: Incremental add instead of full rebuild.
 			edges.resize(0);
 			tris.resize(0);
+			// xiehong：每加入一个点，就执行一次得劳内三角化
 			delaunayHull(ctx, nverts, verts, nhull, hull, tris, edges);
 		}
 	}
@@ -1021,6 +1056,9 @@ static void push3(rcIntArray& queue, int v1, int v2, int v3)
 	queue[queue.size() - 1] = v3;
 }
 
+// xiehong： 返回某个region所在平面的所有高度（注意是所有高度，包括跟这个region相连的其他region，只要在某个范围内即可）
+// 先根据regionid得到这个region内的点的高度，并记录边缘
+// 再根据边缘一点点往外扩展，BFS是广度遍历，直到没有可以加入的点
 static void getHeightData(rcContext* ctx, const rcCompactHeightfield& chf,
 						  const unsigned short* poly, const int npoly,
 						  const unsigned short* verts, const int bs,
@@ -1043,6 +1081,7 @@ static void getHeightData(rcContext* ctx, const rcCompactHeightfield& chf,
 	{
 		// Copy the height from the same region, and mark region borders
 		// as seed points to fill the rest.
+		// xiehong：这一步是找出本region的最外侧span，并记录region的每个span高度
 		for (int hy = 0; hy < hp.height; hy++)
 		{
 			int y = hp.ymin + hy + bs;
@@ -1208,6 +1247,9 @@ bool rcBuildPolyMeshDetail(rcContext* ctx, const rcPolyMesh& mesh, const rcCompa
 		return false;
 	}
 	
+	// xiehong：生成每个poly在x-z平面上的包围盒
+	// 得到顶点总数
+	// 得到所有包围盒中最大的尺寸（maxhw、maxhh）
 	// Find max size for a polygon area.
 	for (int i = 0; i < mesh.npolys; ++i)
 	{
@@ -1326,11 +1368,15 @@ bool rcBuildPolyMeshDetail(rcContext* ctx, const rcPolyMesh& mesh, const rcCompa
 		// Store detail submesh.
 		const int ntris = tris.size()/4;
 		
+		// xiehong 按顺序存
+		// 之前的顶点个数总合，本poly顶点个数
+		// 之前的三角形个数总和，本poly的三角形个数
 		dmesh.meshes[i*4+0] = (unsigned int)dmesh.nverts;
 		dmesh.meshes[i*4+1] = (unsigned int)nverts;
 		dmesh.meshes[i*4+2] = (unsigned int)dmesh.ntris;
 		dmesh.meshes[i*4+3] = (unsigned int)ntris;
-		
+
+		// 保存顶点坐标到rcPolyMeshDetail
 		// Store vertices, allocate more memory if necessary.
 		if (dmesh.nverts+nverts > vcap)
 		{
@@ -1356,6 +1402,7 @@ bool rcBuildPolyMeshDetail(rcContext* ctx, const rcPolyMesh& mesh, const rcCompa
 			dmesh.nverts++;
 		}
 		
+		// 保存三角形数据到rcPolyMeshDetail
 		// Store triangles, allocate more memory if necessary.
 		if (dmesh.ntris+ntris > tcap)
 		{

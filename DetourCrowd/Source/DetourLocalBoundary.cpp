@@ -81,6 +81,9 @@ void dtLocalBoundary::addSegment(const float dist, const float* s)
 		m_nsegs++;
 }
 
+// xiehong：根据当前的位置和collisionQueryRange计算出附近的阻挡，每个阻挡用一个Segment表示（就是一条线段）
+// 这条线段大概率是某个不能通过的poly的边，也有小概率是poly边的一部分，这是因为：
+// 如果这个边是tile边界的话，就有可能出现这条边对应另一个tile上的不止一个poly，可能其中的某个poly无法通过，而另外的poly则可用通过
 void dtLocalBoundary::update(dtPolyRef ref, const float* pos, const float collisionQueryRange,
 							 dtNavMeshQuery* navquery, const dtQueryFilter* filter)
 {

@@ -216,6 +216,7 @@ struct rcConfig
 	float ch;
 
 	/// The minimum bounds of the field's AABB. [(x, y, z)] [Units: wu]
+	// xiehong：这个是Tile加上border的大小
 	float bmin[3]; 
 
 	/// The maximum bounds of the field's AABB. [(x, y, z)] [Units: wu]

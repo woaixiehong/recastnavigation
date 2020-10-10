@@ -534,6 +534,8 @@ static float distancePtSeg(const int x, const int z,
 						   const int px, const int pz,
 						   const int qx, const int qz)
 {
+	// 点到线段的距离
+	// 先做垂线，如果垂线与线段交点超出了线段，则取到近端点的距离
 	float pqx = (float)(qx - px);
 	float pqz = (float)(qz - pz);
 	float dx = (float)(x - px);

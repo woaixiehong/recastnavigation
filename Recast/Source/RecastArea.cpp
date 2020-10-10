@@ -34,6 +34,8 @@
 /// This method is usually called immediately after the heightfield has been built.
 ///
 /// @see rcCompactHeightfield, rcBuildCompactHeightfield, rcConfig::walkableRadius
+// xiehong：标记出边缘span，并给非边缘span标记出距离最近的边缘span的距离
+// 距离太小会被设置为不可行走区域
 bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 {
 	rcAssert(ctx);
@@ -43,6 +45,8 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 	
 	rcScopedTimer timer(ctx, RC_TIMER_ERODE_AREA);
 	
+	// xiehong： dist表示这个span距离不可行走区域的最近距离（单位体素），如果边上有不可行走的span，它dist直接为0。
+	// 其他每个相邻span权重为2，45度相邻的权重为3，找到从span到不可行走最近的那条线就是这个span的dist。
 	unsigned char* dist = (unsigned char*)rcAlloc(sizeof(unsigned char)*chf.spanCount, RC_ALLOC_TEMP);
 	if (!dist)
 	{
@@ -63,6 +67,8 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 			{
 				if (chf.areas[i] == RC_NULL_AREA)
 				{
+					// xiehong：根据之前的代码，理论上到这一步的时候，还不会有哪个compactspan被标记为RC_NULL_AREA
+					// 所以试了一下，貌似确实不会有代码进入这里。
 					dist[i] = 0;
 				}
 				else
@@ -78,6 +84,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 							const int nidx = (int)chf.cells[nx+ny*w].index + rcGetCon(s, dir);
 							if (chf.areas[nidx] != RC_NULL_AREA)
 							{
+								// 根据之前的代码，这个判断也不可能为false
 								nc++;
 							}
 						}
@@ -89,6 +96,8 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 			}
 		}
 	}
+
+	// xiehong：只要有一个方向不可寻走，dist就是0，否则是255
 	
 	unsigned char nd;
 	
@@ -213,6 +222,38 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 		if (dist[i] < thr)
 			chf.areas[i] = RC_NULL_AREA;
 	
+	/* xiehong：打印出所有距离
+	for (int y = 0; y < h; ++y)
+	{
+		char temp1[10240] = "";
+		for (int x = 0; x < w; ++x)
+		{
+			const rcCompactCell& c = chf.cells[x + y * w];
+			char temp2[10240] = "-1";
+			for (int i = (int)c.index, ni = (int)(c.index + c.count); i < ni; ++i)
+			{
+				char temp3[1024] = "";
+				sprintf(temp3, "%d", dist[i]);
+				if (i == (int)c.index) {
+					strcpy(temp2, temp3);
+				}
+				else {
+					strcat(temp2, "+");
+					strcat(temp2, temp3);
+				}
+			}
+
+			if (x == 0)
+			{
+				sprintf(temp1, "%s", temp2);
+			}
+			else {
+				strcat(temp1, ",\t");
+				strcat(temp1, temp2);
+			}
+		}
+		ctx->log(RC_LOG_ERROR, temp1);
+	}*/
 	rcFree(dist);
 	
 	return true;
